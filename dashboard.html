@@ -114,6 +114,34 @@ main{max-width:1240px;margin:0 auto;padding:20px 26px 70px;display:grid;gap:16px
 .ind .hom.nulo{color:var(--tinta2)}
 .ind-nota{margin-top:12px;border-top:1px dashed var(--linha);padding-top:10px;
   font-size:11.5px;color:var(--tinta2)}
+
+/* empresas: stock and flow */
+.sec-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.sec-chips .chip[aria-pressed="true"]{background:var(--atlantico);color:#fff;
+  border-color:var(--atlantico)}
+#sf{width:100%;height:auto;display:block;max-width:780px;margin:0 auto}
+#sf .cx{fill:var(--papel);stroke:var(--tinta);stroke-width:1.6}
+#sf .fl{stroke:var(--atlantico);stroke-width:9;opacity:.20}
+#sf .flc{stroke:var(--atlantico);stroke-width:1.2;fill:none}
+#sf text{font-family:"Archivo",sans-serif}
+#sf .big{font:700 26px "Spline Sans Mono";fill:var(--tinta)}
+#sf .num{font:700 15px "Spline Sans Mono";fill:var(--tinta)}
+#sf .lab{font-size:11px;fill:var(--tinta2)}
+#sf .cap{font:10px "Spline Sans Mono";fill:var(--tinta2);
+  text-transform:uppercase;letter-spacing:.06em}
+.sf-coer{margin-top:10px;text-align:center;font:11.5px "Spline Sans Mono";
+  color:var(--tinta2)}
+.sf-coer b{color:var(--tinta)}
+.emp-g{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:18px;
+  border-top:1px solid var(--linha2);padding-top:14px}
+.emp-g h3{font:600 11px "Spline Sans Mono";letter-spacing:.14em;
+  text-transform:uppercase;color:var(--tinta2);margin-bottom:8px}
+.bar{display:grid;grid-template-columns:118px 1fr 78px;gap:8px;
+  align-items:center;padding:3px 0;font-size:11.5px}
+.bar i{height:9px;border-radius:2px;background:var(--atlantico);display:block}
+.bar .n{font:11.5px "Spline Sans Mono";text-align:right;color:var(--tinta)}
+.emp-novas{margin-top:16px;border-top:1px solid var(--linha2);padding-top:12px}
+@media(max-width:720px){.emp-g{grid-template-columns:1fr}}
 @media(max-width:720px){.ind{grid-template-columns:1fr 84px 74px}
   .ind svg{width:100%}.ind .nome{grid-column:1/-1}}
 
@@ -244,6 +272,21 @@ details.arquivo>div{padding:0 18px 16px}
     <h2>Indicadores oficiais — séries estatísticas do Algarve</h2>
     <div id="indicadores"></div>
     <div class="ind-nota" id="indNota"></div>
+  </section>
+
+  <section class="painel">
+    <h2>Empresas — stock e fluxos do tecido empresarial</h2>
+    <div class="sec-chips" id="secChips" role="group" aria-label="Filtro de sector"></div>
+    <svg id="sf" viewBox="0 0 780 178" role="img"
+      aria-label="Diagrama de stock e fluxos de empresas"></svg>
+    <div class="sf-coer" id="sfCoer"></div>
+    <div class="emp-g">
+      <div><h3 id="vabTit">Contribuição sectorial para o VAB</h3><div id="barsVab"></div></div>
+      <div><h3 id="vnTit">Volume de negócios por sector</h3><div id="barsVn"></div></div>
+    </div>
+    <div class="emp-novas" id="empPessoal"></div>
+    <div class="emp-novas" id="empNovas"></div>
+    <div class="ind-nota" id="empNota"></div>
   </section>
 
   <section class="painel">
@@ -568,13 +611,13 @@ function ranking(){
 const MES_ABR=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 function rotPeriodo(p){
   if(p.length===4)return p;
+  if(p[5]==="T")return p.slice(5)+" "+p.slice(0,4);
   if(p.length===7)return MES_ABR[+p.slice(5,7)-1]+" "+p.slice(0,4);
   return p.slice(8,10)+" "+MES_ABR[+p.slice(5,7)-1];
 }
 function homologoDe(p){            // mesmo periodo do ano anterior
   if(p.length===4)return String(+p-1);
-  if(p.length===7)return (+p.slice(0,4)-1)+"-"+p.slice(5,7);
-  return (+p.slice(0,4)-1)+p.slice(4);
+  return (+p.slice(0,4)-1)+p.slice(4);   // serve mensal, trimestral e diario
 }
 const fmtN=v=>Math.round(v).toLocaleString("pt-PT");
 function sparkline(pontos){
@@ -615,12 +658,13 @@ function indicadores(){
     let cls="nulo",txt="—";
     if(vh!==undefined&&vh!==0){
       const d=(vu/vh-1)*100;
-      const bom=(d>=0?1:-1)*(s.sentido||1)>0;
-      cls=Math.abs(d)<0.05?"nulo":(bom?"bom":"mau");
+      const sent=s.sentido===undefined?1:s.sentido;
+      const bom=(d>=0?1:-1)*sent>0;
+      cls=(sent===0||Math.abs(d)<0.05)?"nulo":(bom?"bom":"mau");
       txt=(d>=0?"▲ ":"▼ ")+Math.abs(d).toLocaleString("pt-PT",
         {minimumFractionDigits:1,maximumFractionDigits:1})+"%";
     }
-    const escala={M:"mensal",A:"anual",D:"diário"}[s.periodicidade]||"";
+    const escala={M:"mensal",A:"anual",T:"trimestral",D:"diário"}[s.periodicidade]||"";
     return `<div class="ind">
       <div class="nome">${s.rotulo}
         <small>${s.fonte} · ${escala} · ${amb==="regiao"?"região":amb}</small></div>
@@ -642,7 +686,142 @@ function indicadores(){
     `Fontes: ${fontes}.`;
 }
 
-function refresca(){ticker();mapa();kpis();sinais();ranking();tendencias();indicadores();grafo();arquivo();
+/* ---------- empresas: stock and flow ---------- */
+let sectorSel="todos";
+const fmtEURc=v=>v>=1e9?(v/1e9).toLocaleString("pt-PT",{maximumFractionDigits:2})+" mM€"
+  :v>=1e6?(v/1e6).toLocaleString("pt-PT",{maximumFractionDigits:1})+" M€":fmtN(v)+" €";
+(function(){
+  const E=(D.empresas||{}), el=document.getElementById("secChips");
+  if(!el)return;
+  const secs=E.sectores||{};
+  ["todos","tech","turismo","construcao","comercio","agro_mar","outros"].forEach(k=>{
+    if(k!=="todos"&&!(k in secs))return;
+    const b=document.createElement("button");
+    b.className="chip";b.textContent=secs[k]||k;
+    b.setAttribute("aria-pressed",k===sectorSel);
+    b.onclick=()=>{sectorSel=k;
+      [...el.children].forEach(c=>c.setAttribute("aria-pressed",false));
+      b.setAttribute("aria-pressed",true);empresas();};
+    el.appendChild(b);
+  });
+})();
+function empresas(){
+  const E=D.empresas||{series:[],novas:[]};
+  const svg=document.getElementById("sf");
+  const nota=document.getElementById("empNota");
+  if(!E.series||!E.series.length){
+    svg.innerHTML=`<text x="390" y="90" text-anchor="middle" class="lab">Sem dados de empresas. Corre python harvest_dados.py fetch --fonte empresas.</text>`;
+    ["sfCoer","barsVab","barsVn","empPessoal","empNovas"].forEach(i=>document.getElementById(i).innerHTML="");
+    nota.textContent="";return;
+  }
+  const base=(concelhoSel&&E.series.some(s=>s.ambitos[concelhoSel]))?concelhoSel:"regiao";
+  const S=n=>E.series.find(s=>s.serie===n);
+  const P=(n,b)=>{const s=S(n);if(!s)return [];
+    const a=s.ambitos[b||base]||s.ambitos.regiao||{};return a[sectorSel]||[];};
+  const ult=a=>a.length?a[a.length-1]:null;
+  const soma12=a=>a.slice(-12).reduce((t,p)=>t+p[1],0);
+
+  const st=ult(P("empresas_stock")), na=ult(P("empresas_nascimentos")),
+        mo=ult(P("empresas_mortes"));
+  const cts=P("constituicoes_mes"), dis=P("dissolucoes_mes");
+  const stAnt=P("empresas_stock").slice(-2)[0];
+  const dStock=(st&&stAnt&&stAnt[1])?((st[1]/stAnt[1]-1)*100):null;
+
+  const seta=(x1,x2,y)=>`<line class="fl" x1="${x1}" y1="${y}" x2="${x2-14}" y2="${y}"/>`+
+    `<path class="flc" d="M${x2-16} ${y-9} L${x2} ${y} L${x2-16} ${y+9}" fill="var(--atlantico)" opacity=".55"/>`;
+  const par=(x,y,anc,rot,val,per)=>val==null?"":
+    `<text x="${x}" y="${y}" text-anchor="${anc}" class="num">${fmtN(val)}</text>`+
+    `<text x="${x}" y="${y+13}" text-anchor="${anc}" class="lab">${rot}</text>`+
+    `<text x="${x}" y="${y+25}" text-anchor="${anc}" class="cap">${per}</text>`;
+  svg.innerHTML=
+    seta(8,258,89)+seta(524,772,89)+
+    `<rect class="cx" x="266" y="34" width="248" height="110" rx="5"/>`+
+    `<text x="390" y="60" text-anchor="middle" class="cap">empresas activas</text>`+
+    `<text x="390" y="94" text-anchor="middle" class="big">${st?fmtN(st[1]):"—"}</text>`+
+    `<text x="390" y="114" text-anchor="middle" class="lab">${st?st[0]:""}${
+      dStock==null?"":`  ·  ${dStock>=0?"▲":"▼"} ${Math.abs(dStock).toFixed(1)}% vs ${stAnt[0]}`}</text>`+
+    `<text x="390" y="133" text-anchor="middle" class="cap">${(E.sectores||{})[sectorSel]||sectorSel} · ${base==="regiao"?"região":base}</text>`+
+    par(126,52,"middle","nascimentos",na?na[1]:null,na?na[0]:"")+
+    par(126,126,"middle","constituições",cts.length?soma12(cts):null,"últimos 12 meses")+
+    par(650,52,"middle","mortes",mo?mo[1]:null,mo?mo[0]:"")+
+    par(650,126,"middle","dissoluções",dis.length?soma12(dis):null,"últimos 12 meses");
+
+  /* coerencia: stock(n) = stock(n-1) + nascimentos - mortes */
+  const coer=document.getElementById("sfCoer");
+  if(st&&stAnt&&na&&mo&&na[0]===st[0]&&mo[0]===st[0]){
+    const prev=stAnt[1]+na[1]-mo[1], dev=st[1]-prev;
+    const pct=prev?Math.abs(dev/prev*100):0;
+    coer.innerHTML=`coerência ${st[0]}: <b>${fmtN(stAnt[1])}</b> + <b>${fmtN(na[1])}</b> − <b>${fmtN(mo[1])}</b> = ${fmtN(prev)}, `+
+      `stock publicado <b>${fmtN(st[1])}</b>, desvio ${dev>=0?"+":"−"}${fmtN(Math.abs(dev))} (${pct.toFixed(1)}%). `+
+      `O desvio é esperado: nascimentos e mortes contam empresas com actividade económica no ano, o stock conta as activas a 31 de Dezembro, e as mortes do último ano ainda são provisórias.`;
+  }else{
+    coer.innerHTML=`Sem ano comum entre stock, nascimentos e mortes para fechar a identidade contabilística. As mortes são confirmadas com cerca de dois anos de atraso.`;
+  }
+
+  /* barras sectoriais */
+  const barras=(id,serie,amb,fmt)=>{
+    const s=S(serie), el=document.getElementById(id);
+    if(!s){el.innerHTML="<div class='vazio'>sem dados</div>";return null;}
+    const a=s.ambitos[amb]||s.ambitos.regiao||{};
+    const linhas=Object.keys(E.sectores||{}).filter(k=>k!=="todos")
+      .map(k=>{const p=ult(a[k]||[]);return p?[k,p[1],p[0]]:null}).filter(Boolean)
+      .sort((x,y)=>y[1]-x[1]);
+    if(!linhas.length){el.innerHTML="<div class='vazio'>sem dados</div>";return null;}
+    const max=Math.max(...linhas.map(l=>l[1]));
+    el.innerHTML=linhas.map(([k,v])=>
+      `<div class="bar"><span>${E.sectores[k]}</span>`+
+      `<i style="width:${Math.max(2,v/max*100)}%"></i>`+
+      `<span class="n">${fmt(v)}</span></div>`).join("");
+    return linhas[0][2];
+  };
+  const anoVab=barras("barsVab","vab_sector","regiao",fmtEURc);
+  const anoVn=barras("barsVn","empresas_vn",base,fmtEURc);
+  document.getElementById("vabTit").textContent=
+    "VAB por sector, Algarve"+(anoVab?" · "+anoVab:"");
+  document.getElementById("vnTit").textContent=
+    "Volume de negócios por sector · "+(base==="regiao"?"região":base)+(anoVn?" · "+anoVn:"");
+
+  /* pessoal ao servico */
+  const pes=P("empresas_pessoal"), pel=document.getElementById("empPessoal");
+  if(pes.length){
+    const u=pes[pes.length-1], m=Object.fromEntries(pes), h=m[homologoDe(u[0])];
+    let vhTxt="—",cls="nulo";
+    if(h){const d=(u[1]/h-1)*100;cls=Math.abs(d)<0.05?"nulo":(d>0?"bom":"mau");
+      vhTxt=(d>=0?"▲ ":"▼ ")+Math.abs(d).toFixed(1)+"%";}
+    pel.innerHTML=`<div class="ind"><div class="nome">Pessoal ao serviço nas empresas
+      <small>INE · anual · ${(E.sectores||{})[sectorSel]||sectorSel} · ${base==="regiao"?"região":base}</small></div>
+      ${sparkline(pes)}<div class="ult">${fmtN(u[1])}<small>${u[0]}</small></div>
+      <div class="hom ${cls}">${vhTxt}<small>homóloga</small></div></div>`;
+  }else pel.innerHTML="";
+
+  /* empresas novas (tabela empresas_registo) */
+  const nv=E.novas||[], nel=document.getElementById("empNovas");
+  nel.innerHTML=nv.length
+    ? `<h3 style="font:600 11px 'Spline Sans Mono';letter-spacing:.14em;text-transform:uppercase;color:var(--tinta2);margin-bottom:8px">Empresas novas</h3>`+
+      nv.filter(e=>!concelhoSel||e.concelho===concelhoSel).slice(0,20).map(e=>
+        `<div class="bar" style="grid-template-columns:1fr 90px 70px 60px">
+          <span>${e.nome}</span><span class="n">${e.concelho||""}</span>
+          <span class="n">${e.cae||"—"}</span>
+          <span class="n">${e.tech!=null?"tech "+e.tech:""}</span></div>`).join("")
+    : `<div class="vazio" style="padding:14px">Lista de empresas novas por identidade ainda sem fonte.
+       O portal de publicações do Ministério da Justiça tem reCAPTCHA e NoBot no único ponto de pesquisa,
+       por isso a recolha empresa a empresa ficou adiada (ver NOTAS_dados.md). Os fluxos acima vêm das
+       contagens mensais do INE por concelho e secção CAE.</div>`;
+
+  nota.innerHTML=`As setas trazem duas medidas que não são comparáveis entre si e não devem ser somadas:
+    <em>nascimentos</em> e <em>mortes</em> são a demografia de empresas do INE, anual, e incluem
+    empresários em nome individual; <em>constituições</em> e <em>dissoluções</em> são actos de registo
+    de pessoas colectivas (INE/DGPJ), mensais, e por isso muito menores. A caixa central e a identidade
+    contabilística usam só a série anual. <br>Sectores agregados ao nível de secção CAE Rev.3: tecnologia = J, turismo = I,
+    construção e imobiliário = F+L, comércio = G, agro-alimentar e mar = A, outros = as restantes.
+    As divisões 62 e 63 já estão dentro de J; M72, N79 e C10-C11 não são separáveis porque os
+    indicadores de demografia das empresas só publicam secções. "Todos" usa a categoria TOT do INE;
+    os sectores individuais somam as secções com dado publicado, pelo que ficam ligeiramente
+    subestimados quando o INE suprime uma célula por segredo estatístico. Fontes: INE (SCIE,
+    Demografia das Empresas, Contas Regionais, DGPJ).`;
+}
+
+function refresca(){ticker();mapa();kpis();sinais();ranking();tendencias();indicadores();empresas();grafo();arquivo();
   const p=periodo();
   document.getElementById("periodoNota").textContent=
     (p.de||p.ate||catsActivas.size<5)?`a mostrar ${itensP().length} de ${D.total} itens`

@@ -36,12 +36,44 @@ SERIES_META = {
     "passageiros_desembarcados": ("Passageiros desembarcados em Faro", 1),
     "voos_chegadas": ("Chegadas diárias a Faro", 1),
     "voos_partidas": ("Partidas diárias de Faro", 1),
+    "preco_habitacao": ("Valor mediano de venda por m²", 0),
+    "consumo_electrico": ("Consumo de electricidade", 1),
 }
 ORDEM = list(SERIES_META)
 
+# Fase 1b: series com ambito 'Concelho|SECCAO'. Saem do painel de indicadores e
+# vao para window.DADOS.empresas, ja agregadas por sector.
+SECTORES = {
+    "tech": ["J"],
+    "turismo": ["I"],
+    "construcao": ["F", "L"],
+    "comercio": ["G"],
+    "agro_mar": ["A"],
+    "outros": ["B", "C", "D", "E", "H", "M", "N", "P", "Q", "R", "S"],
+}
+SECTOR_ROTULOS = {
+    "todos": "Todos os sectores", "tech": "Tecnologia", "turismo": "Turismo",
+    "construcao": "Construção e imobiliário", "comercio": "Comércio",
+    "agro_mar": "Agro-alimentar e mar", "outros": "Outros sectores",
+}
+EMPRESAS_META = {
+    "empresas_stock": ("Empresas activas", "n", "A"),
+    "empresas_nascimentos": ("Nascimentos de empresas", "n", "A"),
+    "empresas_mortes": ("Mortes de empresas", "n", "A"),
+    "empresas_vn": ("Volume de negócios", "eur", "A"),
+    "empresas_pessoal": ("Pessoal ao serviço", "n", "A"),
+    "vab_sector": ("VAB por ramo (Algarve)", "eur", "A"),
+    "constituicoes_mes": ("Constituições", "n", "M"),
+    "dissolucoes_mes": ("Dissoluções", "n", "M"),
+}
+N_MESES_EMPRESAS = 24
+
 
 def periodicidade(periodo):
-    return {4: "A", 7: "M", 10: "D"}.get(len(periodo or ""), "?")
+    p = periodo or ""
+    if "T" in p:
+        return "T"
+    return {4: "A", 7: "M", 10: "D"}.get(len(p), "?")
 
 
 def ler_indicadores(con):
@@ -61,6 +93,8 @@ def ler_indicadores(con):
 
     bruto = {}
     for serie, ambito, periodo, valor, unidade, fonte in linhas:
+        if "|" in ambito:          # series por sector: vao para ler_empresas
+            continue
         s = bruto.setdefault(serie, {"unidade": unidade, "fonte": fonte,
                                      "ambitos": {}})
         s["ambitos"].setdefault(ambito, []).append((periodo, valor))
@@ -99,6 +133,79 @@ def ler_indicadores(con):
     return out
 
 
+def ler_empresas(con):
+    """Series com ambito 'Concelho|SECCAO', agregadas por sector.
+
+    'todos' usa a categoria TOT do INE, que nunca vem suprimida por segredo
+    estatistico. Os restantes sectores sao a soma das seccoes com dado
+    publicado, pelo que ficam subestimados quando o INE suprime uma celula
+    (acontece em 6 a 11% das combinacoes concelho x seccao, quase sempre em
+    seccoes marginais no Algarve: extractivas, electricidade, agua).
+    """
+    try:
+        linhas = con.execute(
+            "SELECT serie, ambito, periodo, valor, unidade, fonte "
+            "FROM indicadores WHERE ambito LIKE '%|%' "
+            "ORDER BY serie, ambito, periodo").fetchall()
+    except sqlite3.OperationalError:
+        return {"series": [], "sectores": SECTOR_ROTULOS}
+    if not linhas:
+        return {"series": [], "sectores": SECTOR_ROTULOS}
+
+    # serie -> base -> periodo -> {seccao: valor}
+    bruto, fontes = {}, {}
+    for serie, ambito, periodo, valor, unidade, fonte in linhas:
+        base, _, sec = ambito.partition("|")
+        if valor is None:
+            continue
+        fontes[serie] = (unidade, fonte)
+        bruto.setdefault(serie, {}).setdefault(base, {}) \
+             .setdefault(periodo, {})[sec] = valor
+
+    def agregar(por_seccao):
+        out = {"todos": por_seccao.get("TOT")}
+        for nome, secs in SECTORES.items():
+            vals = [por_seccao[s] for s in secs if s in por_seccao]
+            out[nome] = sum(vals) if vals else None
+        return out
+
+    series = []
+    for serie in EMPRESAS_META:
+        if serie not in bruto:
+            continue
+        rotulo, unidade_pref, perio = EMPRESAS_META[serie]
+        unidade, fonte = fontes.get(serie, (unidade_pref, "INE"))
+        bases = bruto[serie]
+        # agregado regional por soma dos concelhos (excepto series ja regionais)
+        if "regiao" not in bases and len(bases) > 1:
+            soma = {}
+            for por_periodo in bases.values():
+                for periodo, secs in por_periodo.items():
+                    alvo = soma.setdefault(periodo, {})
+                    for s, v in secs.items():
+                        alvo[s] = alvo.get(s, 0.0) + v
+            bases = dict(bases)
+            bases["regiao"] = soma
+        ambitos = {}
+        for base, por_periodo in bases.items():
+            periodos = sorted(por_periodo)
+            if perio == "M":
+                periodos = periodos[-N_MESES_EMPRESAS:]
+            por_sector = {}
+            for periodo in periodos:
+                for nome, val in agregar(por_periodo[periodo]).items():
+                    if val is not None:
+                        por_sector.setdefault(nome, []).append([periodo, val])
+            if por_sector:
+                ambitos[base] = por_sector
+        if ambitos:
+            series.append({
+                "serie": serie, "rotulo": rotulo, "unidade": unidade,
+                "fonte": fonte, "periodicidade": perio, "ambitos": ambitos,
+            })
+    return {"series": series, "sectores": SECTOR_ROTULOS}
+
+
 def main():
     con = sqlite3.connect(DB)
     linhas = con.execute(
@@ -121,11 +228,25 @@ def main():
             "geo_forcado": d.get("geo_forcado", False),
         })
     indicadores = ler_indicadores(con)
+    empresas = ler_empresas(con)
+    try:
+        novas = con.execute(
+            "SELECT nome, concelho, cae, cae_seccao, capital_social, "
+            "relevancia_tech, data_acto FROM empresas_registo "
+            "WHERE acto='constituicao' ORDER BY data_acto DESC "
+            "LIMIT 60").fetchall()
+    except sqlite3.OperationalError:
+        novas = []
+    empresas["novas"] = [
+        {"nome": n, "concelho": c, "cae": cae, "seccao": sec,
+         "capital": cap, "tech": tech, "data": d}
+        for n, c, cae, sec, cap, tech, d in novas]
     payload = {
         "gerado_em": datetime.now(timezone.utc).isoformat(),
         "total": len(itens),
         "itens": itens,
         "indicadores": indicadores,
+        "empresas": empresas,
     }
     SAIDA.write_text("window.DADOS = " +
                      json.dumps(payload, ensure_ascii=False) + ";",
@@ -133,6 +254,10 @@ def main():
     pontos = sum(len(p) for s in indicadores for p in s["ambitos"].values())
     print(f"{len(itens)} itens exportados para {SAIDA.name}")
     print(f"{len(indicadores)} séries de indicadores ({pontos} pontos)")
+    p_emp = sum(len(v) for s in empresas["series"]
+                for a in s["ambitos"].values() for v in a.values())
+    print(f"{len(empresas['series'])} séries de empresas por sector "
+          f"({p_emp} pontos) · {len(empresas['novas'])} empresas no registo")
     print("Abre o dashboard.html no browser.")
 
 
