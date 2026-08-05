@@ -251,12 +251,6 @@ details.arquivo>div{padding:0 18px 16px}
     </section>
   </div>
 
-  <section class="painel">
-    <h2>Livro de sinais — acontecimentos concretos, não artigos</h2>
-    <div id="sinais"></div>
-    <button class="mais" id="maisSinais" hidden>Mostrar mais sinais</button>
-  </section>
-
   <div class="g2b">
     <section class="painel">
       <h2>Tendências — itens por semana e categoria</h2>
@@ -280,13 +274,19 @@ details.arquivo>div{padding:0 18px 16px}
     <svg id="sf" viewBox="0 0 780 178" role="img"
       aria-label="Diagrama de stock e fluxos de empresas"></svg>
     <div class="sf-coer" id="sfCoer"></div>
+    <div class="emp-novas" id="empNovas"></div>
     <div class="emp-g">
       <div><h3 id="vabTit">Contribuição sectorial para o VAB</h3><div id="barsVab"></div></div>
       <div><h3 id="vnTit">Volume de negócios por sector</h3><div id="barsVn"></div></div>
     </div>
     <div class="emp-novas" id="empPessoal"></div>
-    <div class="emp-novas" id="empNovas"></div>
     <div class="ind-nota" id="empNota"></div>
+  </section>
+
+  <section class="painel">
+    <h2>Livro de sinais — acontecimentos concretos, não artigos</h2>
+    <div id="sinais"></div>
+    <button class="mais" id="maisSinais" hidden>Mostrar mais sinais</button>
   </section>
 
   <section class="painel">
@@ -491,16 +491,28 @@ function tendencias(){
     const j=new Date(Date.UTC(t.getUTCFullYear(),0,1));
     return t.getUTCFullYear()+"-"+String(Math.ceil(((t-j)/864e5+1)/7)).padStart(2,"0");};
   const sems=[...new Set(base.map(i=>semana(i.publicado_em)).filter(Boolean))].sort().slice(-10);
+  const rotSem=s=>{const[y,w]=s.split("-").map(Number);
+    const d=new Date(Date.UTC(y,0,1+(w-1)*7));
+    return d.getUTCDate()+"/"+(d.getUTCMonth()+1);};
   const el=document.getElementById("tendencias");el.innerHTML="";
   CATS.forEach(c=>{
     const conta=sems.map(s=>base.filter(i=>i.categoria===c&&semana(i.publicado_em)===s).length);
     const max=Math.max(1,...conta), tot=conta.reduce((a,b)=>a+b,0);
     const div=document.createElement("div");div.className="tend";
     div.innerHTML=`<span>${ROT[c]}</span>
-      <div class="semanas">${conta.map(v=>`<i style="height:${v/max*100}%;background:${CORES[c]}" title="${v}"></i>`).join("")}</div>
+      <div class="semanas">${conta.map((v,ix)=>`<i style="height:${v/max*100}%;background:${CORES[c]}" title="${v} itens · semana de ${rotSem(sems[ix])}"></i>`).join("")}</div>
       <span class="n">${tot}</span>`;
     el.appendChild(div);
   });
+  if(sems.length){
+    const eixo=document.createElement("div");eixo.className="tend";
+    eixo.style.borderTop="1px solid var(--linha2)";
+    eixo.innerHTML=`<span style="font-size:9px;color:var(--tinta2)">início da semana</span>
+      <div class="semanas" style="height:auto;align-items:start">${sems.map(sm=>
+        `<span style="flex:1;text-align:center;font:8.5px 'Spline Sans Mono';color:var(--tinta2)">${rotSem(sm)}</span>`).join("")}</div>
+      <span></span>`;
+    el.appendChild(eixo);
+  }
 }
 
 /* ---------- grafo de co-mencoes ---------- */
@@ -809,19 +821,21 @@ function empresas(){
     nel.innerHTML=
       `<h3 style="font:600 11px 'Spline Sans Mono';letter-spacing:.14em;text-transform:uppercase;color:var(--tinta2);margin-bottom:4px">Fluxo por sector, últimos 12 meses · ${base==="regiao"?"região":base}</h3>`+
       `<div style="font:10px 'Spline Sans Mono';color:var(--tinta2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${per} · actos de registo de pessoas colectivas (INE/DGPJ)</div>`+
-      `<div class="bar" style="grid-template-columns:150px 1fr 66px 66px 62px;color:var(--tinta2);font-size:10px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--linha2);padding-bottom:5px">
-        <span>sector</span><span></span><span class="n">constit.</span><span class="n">dissol.</span><span class="n">saldo</span></div>`+
+      `<div class="bar" style="grid-template-columns:150px 66px 1fr 66px 62px;color:var(--tinta2);font-size:10px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--linha2);padding-bottom:5px">
+        <span>sector</span><span class="n">dissol.</span><span style="text-align:center">← dissoluções · constituições →</span><span>constit.</span><span class="n">saldo</span></div>`+
       linhas.map(([k,c,d])=>{
         const sal=c-d, act=k===sectorSel;
-        return `<div class="bar" style="grid-template-columns:150px 1fr 66px 66px 62px${act?";font-weight:600":""}">
+        return `<div class="bar" style="grid-template-columns:150px 66px 1fr 66px 62px${act?";font-weight:600":""}">
           <span>${E.sectores[k]}</span>
-          <span style="display:flex;gap:2px;align-items:center">
-            <i style="width:${c/max*50}%;background:var(--mare)"></i>
-            <i style="width:${d/max*50}%;background:var(--coral)"></i></span>
-          <span class="n">${fmtN(c)}</span><span class="n">${fmtN(d)}</span>
+          <span class="n" style="color:var(--coral)">${fmtN(d)}</span>
+          <span style="display:grid;grid-template-columns:1fr 1px 1fr;align-items:center">
+            <span style="display:flex;justify-content:flex-end"><i style="width:${d/max*100}%;background:var(--coral)"></i></span>
+            <span style="background:var(--tinta);height:14px;opacity:.35"></span>
+            <span style="display:flex"><i style="width:${c/max*100}%;background:var(--mare)"></i></span></span>
+          <span style="color:var(--mare)">${fmtN(c)}</span>
           <span class="n" style="color:${sal>=0?"var(--mare)":"var(--coral)"}">${sal>=0?"+":"−"}${fmtN(Math.abs(sal))}</span></div>`;
       }).join("")+
-      `<div style="margin-top:8px;font-size:11px;color:var(--tinta2)">Verde: constituições. Vermelho: dissoluções.
+      `<div style="margin-top:8px;font-size:11px;color:var(--tinta2)">Fluxos de sinal oposto num eixo central: dissoluções crescem para a esquerda, constituições para a direita; o saldo é a diferença.
         A identidade das empresas (nome, NIPC, objecto social) ainda não tem fonte: o portal de publicações do
         Ministério da Justiça tem reCAPTCHA e NoBot no único ponto de pesquisa, por isso ficou adiada para
         fonte licenciada. Ver NOTAS_dados.md §5.</div>`;
