@@ -415,3 +415,294 @@ e `entidades.db` estão versionados e a spec parte de um pressuposto que não se
 verifica. O `publish.py` só faz `git add site`, portanto nada disto é agravado
 pelo trabalho deste módulo, mas convém decidir o que fazer, e a spec pedia
 explicitamente para não mexer no ficheiro.
+
+---
+
+# Fase 1b: empresas e conectores secundários
+
+Levantamento de 5 de Agosto de 2026, a seguir à Fase 1. Mesma regra: todos os
+URL citados foram confirmados com pedido HTTP real.
+
+## 5. Portal MJ e SICAE: o registo comercial empresa a empresa
+
+### 5.1 publicacoes.mj.pt: não aconselhável, e a spec manda parar
+
+O Portal das Publicações do Ministério da Justiça tem **duas camadas
+anti-automação activas** no único ponto de entrada de pesquisa
+(`https://publicacoes.mj.pt/Pesquisa.aspx`, HTTP 200, IIS 10 com ASP.NET):
+
+Primeiro, **reCAPTCHA invisível da Google**. O `<head>` carrega
+`//www.google.com/recaptcha/api.js`, o formulário tem o contentor
+`divRecaptcha` com `data-sitekey="6LfWfwkTAAAAAF_tbbsmS54u0N7kpwdWF_kxp3Ks"`, e
+o botão de pesquisa chama `VerifyCaptcha()` no `onclick` antes do postback.
+Segundo, o controlo **NoBot do AjaxControlToolkit**, cujo propósito declarado é
+distinguir humanos de bots por desafio JavaScript (`"ChallengeScript":
+"eval('99+63')"`), tempo mínimo de preenchimento e frequência por IP.
+
+Não foi submetido um único POST ao formulário, por decisão. A spec da Fase 1b
+diz, literalmente, que se qualquer um dos sites bloquear ou exigir captcha se
+deve PARAR, documentar e não contornar. É exactamente este o caso.
+
+Não existe via alternativa. Verificado: `robots.txt` devolve 404 (portanto nada
+proibido nem permitido explicitamente), `sitemap.xml` devolve 404, não há
+endpoint JSON, feed, `.asmx` ou `.svc` referenciado nas páginas públicas, e o
+`DetalhePublicacao.aspx` sem querystring devolve uma página vazia de 11 KB sem
+expor parâmetro de identificação. Para chegar aos resultados seria mesmo preciso
+replicar o ciclo de postbacks ASP.NET com viewstate, e derrotar o captcha.
+
+Três ressalvas que tornam o portal mau alvo mesmo que o captcha não existisse.
+A ajuda oficial (`Ajuda.aspx`) confirma que a pesquisa aceita **no máximo um
+intervalo de 10 dias**, o que obriga a 3 ou 4 pesquisas por mês e por distrito,
+com paginação por cima. Parte das publicações não é texto mas ficheiro PDF. E o
+CAE não aparece no acto de registo, porque vive no FCPC e não no registo
+comercial.
+
+Acresce a questão de dados pessoais. As publicações contêm nomes de sócios e
+gerentes, portanto uma recolha em massa é matéria de RGPD, e não apenas de
+netiqueta técnica: exigiria base de licitude, avaliação de interesse legítimo e
+minimização documentadas.
+
+Enquadramento legal, para registo: o Decreto-Lei 111/2005 e a Portaria
+590-A/2005 criam o regime de publicações em sítio de acesso público e gratuito.
+Acesso público e gratuito não é, porém, o mesmo que autorização de recolha
+automatizada em massa, e o sinal operacional que conta é o captcha.
+
+**Volume que estaria em causa**, apurado por fonte alternativa (INE/DGPJ,
+indicador 0012244, extracção real): cerca de 236 constituições e 67 dissoluções
+por mês no Algarve. O problema nunca foi o volume, foi a barreira.
+
+### 5.2 SICAE: viável, mas precisa do NIPC que o MJ não dá
+
+O `www.sicae.pt` é o oposto. Sem captcha (zero ocorrências de `captcha`,
+`recaptcha` ou `NoBot` no HTML da `Consulta.aspx`), sem `robots.txt` a proibir
+(404), com base legal explícita de acesso público e gratuito na Portaria
+311/2009, e com um endpoint GET trivial:
+
+    http://www.sicae.pt/Detalhe.aspx?NIPC=<nipc>
+
+Testado com dois NIPC de sociedades cotadas: devolve CAE principal e
+secundários, e no POST à `Consulta.aspx` a designação textual do CAE vem no
+atributo `title`, o que dispensa tabela de correspondência.
+
+Duas ressalvas técnicas. O HTTPS não responde a partir de fora de Portugal (o
+servidor faz reset do handshake TLS logo a seguir ao Client Hello; o HTTP
+funciona), o que convém reconfirmar a partir de um IP português antes de
+desenhar seja o que for, porque usar HTTP em produção é mau mesmo para dados
+públicos. E não se conseguiu determinar se os códigos devolvidos são CAE Rev.3
+ou Rev.4, sendo que a Rev.4 está em vigor desde 2025 e os indicadores do INE
+que usamos continuam em Rev.3.
+
+O SICAE fica documentado e por implementar, porque só serve com o NIPC em mão, e
+era o Portal MJ que o daria.
+
+### 5.3 Decisão
+
+Decisão do Jo a 5 de Agosto de 2026: adiar a identidade das empresas. A tabela
+`empresas_registo` fica criada e vazia no `monitor.db`, com o esquema da spec,
+para quando houver fonte. O painel Empresas usa exclusivamente o INE. Se a
+identidade voltar a ser requisito de produto, a alternativa honesta é uma fonte
+comercial licenciada (Informa D&B, Racius, Iberinform), não um scraper do MJ.
+
+Falsas pistas verificadas e descartadas: os datasets do IRN no dados.gov.pt
+(`publicacoes`, `empresas`, `eol`) são agregados nacionais e param em Janeiro de
+2018; e o `diariodarepublica.pt/dr/detalhe/ato-societario/<id>` é uma SPA cujo
+conteúdo só chega por API interna e cobre a III Série anterior a 2006.
+
+## 6. Camada A: o retrato anual do INE
+
+Seis séries validadas contra chamadas reais, todas por município e por secção
+CAE Rev.3, com backfill desde 2015.
+
+| Série | varcd corrente | varcd histórico | Detalhe |
+|---|---|---|---|
+| empresas_stock | 0014063 (2023-2024) | 0008511 (2008-2022) | exige `Dim4=T` |
+| empresas_nascimentos | 0014099 (2023-2024) | 0009703 (2008-2022) | só secções |
+| empresas_mortes | 0014101 (2021-2024) | 0009705 (2008-2022) | ver nota abaixo |
+| empresas_vn | 0013862 (2023-2024) | 0008513 (2008-2022) | euros absolutos |
+| empresas_pessoal | 0013861 (2023-2024) | 0008512 (2008-2022) | número |
+| vab_sector | 0014115 (1995-2023) | código único | NUTS2, milhões |
+
+Quatro descobertas que mudaram o código.
+
+**As mortes de 2021 e 2022 têm de vir do indicador novo.** O 0014101 recua até
+2021 e cria dois anos de sobreposição com o 0009705, e os valores não batem
+certo: 421 de 576 células divergem, e a soma dos 16 municípios em 2022 passa de
+9 259 para 10 047, mais 8,5%. Não é quebra de nomenclatura NUTS, é a revisão de
+provisório para definitivo, visível nos `sinal_conv`: no indicador antigo 2021
+está marcado como provisório e 2022 como estimativa, no novo ambos são
+definitivos. O último ano com mortes definitivas é 2022, o que confirma o atraso
+de cerca de dois anos que a spec antecipava.
+
+**O `Dim4=T` é obrigatório na prática** no indicador de número de empresas.
+Sem ele vêm as três formas jurídicas (total, empresa individual, sociedade) e as
+linhas triplicam.
+
+**O `Potencia10` importa e não se assume.** É 0 nos indicadores SCIE, que vêm em
+euros absolutos, e 6 no VAB das Contas Regionais, que vem em milhões. O
+harvester converte o VAB para euros ao gravar, para bater com o volume de
+negócios.
+
+**A supressão detecta-se com `'valor' not in linha`, nunca pela presença de
+`sinal_conv`.** Os sinais de dado provisório, estimativa e dado rectificado vêm
+acompanhados de valor normal; só o dado confidencial e o dado nulo é que não
+trazem a chave.
+
+**Segredo estatístico, medido.** Nas 272 combinações de 16 municípios por 17
+secções, a supressão afecta 11,0% em 2020, 7,7% em 2022 e 5,9% em 2024, e
+concentra-se em secções marginais no Algarve: extractivas, electricidade, água e
+resíduos, agricultura. O total `TOT` nunca é suprimido, nem nenhuma das secções
+que interessam à região (alojamento e restauração, comércio, construção). O
+número de empresas e a demografia não têm supressão nenhuma; só o volume de
+negócios e o pessoal ao serviço, que partilham exactamente a mesma máscara.
+
+**Agregação sectorial: um desvio deliberado à spec.** A spec pedia tech = J mais
+as divisões 62 e 63 mais M72, e turismo = I mais N79. Os indicadores de
+demografia das empresas só publicam secções, sem divisões, portanto M72 e N79
+não são separáveis lá. Optou-se por definir todos os sectores ao nível de
+secção, de forma coerente entre stock e fluxos, porque é isso que permite fechar
+a identidade contabilística por sector. As divisões 62 e 63 já estavam dentro de
+J, portanto a perda real é M72 (investigação e desenvolvimento), N79 (agências
+de viagens) e C10-C11 (indústrias alimentares). Fica documentado no próprio
+painel.
+
+**Coerência do stock-and-flow, verificada no dashboard.** Para o Algarve em
+2024: 93 838 empresas em 2023, mais 15 625 nascimentos, menos 12 160 mortes, dá
+97 303, contra um stock publicado de 98 598, ou seja um desvio de +1,3%. O
+desvio é esperado e está explicado no painel: nascimentos e mortes contam
+empresas com actividade económica no ano, o stock conta as activas a 31 de
+Dezembro, e as mortes do último ano ainda são provisórias.
+
+**Dois cross-checks independentes.** O número de empresas do Algarve em 2024
+(98 598) e o pessoal ao serviço (233 462) coincidem exactamente com os valores
+que o BeAlgarve publica na sua matriz de indicadores.
+
+**Nota de leitura importante para o painel.** As setas trazem duas medidas que
+não são comparáveis nem somáveis: nascimentos e mortes são demografia de
+empresas do INE, anual, e incluem empresários em nome individual; constituições
+e dissoluções são actos de registo de pessoas colectivas do INE/DGPJ, mensais, e
+por isso muito menores (15 625 nascimentos contra 2 827 constituições em 2024).
+A caixa central e a identidade contabilística usam apenas a série anual.
+
+## 7. Conectores secundários
+
+### 7.1 E-Redes, consumo de electricidade por concelho: implementado
+
+A melhor das fontes secundárias, e território virgem, porque o BeAlgarve não tem
+um único indicador de energia na matriz.
+
+Portal OpenDataSoft em `e-redes.opendatasoft.com`, dataset
+`3-consumos-faturados-por-municipio-ultimos-10-anos`, sem chave e sem
+autenticação. O export CSV traz o distrito de Faro inteiro numa chamada:
+
+    https://e-redes.opendatasoft.com/api/explore/v2.1/catalog/datasets/
+    3-consumos-faturados-por-municipio-ultimos-10-anos/exports/csv
+    ?where=coddistrito%3D%2208%22&delimiter=%3B
+
+Campos úteis: `data` (AAAA-MM), `concelho`, `coddistritoconcelho` (DICO, 0801 a
+0816), `nivel_de_tensao`, `energia_ativa_kwh`. Granularidade de origem: mensal
+por freguesia e por nível de tensão; o harvester agrega ao concelho.
+
+Três armadilhas. O nome do dataset diz dez anos mas são cinco e meio, de
+Novembro de 2020 a Abril de 2026, medido. O filtro de distrito por nome exige
+`"Faro"` em title case, `"FARO"` devolve zero. E o endpoint `/records` tem
+tectos de 100 por página e 10 000 no total, que o `/exports/csv` não tem, por
+isso é o export que se usa.
+
+Existe um bucket `coddistritoconcelho = "08--"`, com o rótulo `OUTROS FARO`, que
+são consumos que o RGPD impede de atribuir a freguesia. Na recolha real pesa
+0,1% do total do distrito, e o harvester ignora-o e reporta a percentagem.
+
+### 7.2 INE, preços da habitação por concelho: implementado
+
+`varcd=0012239`, valor mediano das vendas de alojamentos familiares em euros por
+metro quadrado, trimestral, de 2019 Q1 a 2026 Q1, com os 16 concelhos.
+
+**O prefixo trimestral do INE é `S5A`**, no formato `S5A` + AAAA + trimestre
+(por exemplo `S5A20261`). Completa a série que já conhecíamos: mensal `S3A`,
+anual `S7A`.
+
+A dimensão 3 é o domicílio fiscal do comprador, e usamos o total `T`. Vale a
+pena registar que os códigos `2` (estrangeiro), `21` (União Europeia) e `22`
+(restantes países) existem, e para o Algarve dão o preço pago por compradores
+estrangeiros ao concelho, que é material interessante para uma fase posterior.
+
+Cobertura real da recolha: 400 dos 464 pontos possíveis. As faltas são
+supressão em concelhos com poucas transacções, sobretudo Monchique, que só tem 5
+dos 29 trimestres, seguido de Aljezur e Vila do Bispo.
+
+Códigos despistados: `0012227` e `0012228` são também trimestrais em euros por
+metro quadrado mas a geografia é por cidade, não por concelho.
+
+### 7.3 MONITUR via wp-json: viável, mas sem séries
+
+A REST API do WordPress responde e está aberta, mas a verificação foi
+inequívoca: `wp/v2/types` devolve 11 tipos, todos nativos, **zero custom post
+types**; as 129 rotas são todas do core mais `oembed`; as taxonomias são só
+`category` e `post_tag`, e não se aplicam a media; e a página das fact sheets
+municipais tem zero elementos `<table>` e 36 links para PDF.
+
+O valor real é um índice bibliográfico de 386 PDF com id, data, título, URL e
+tamanho, obtenível em
+`monitur.ualg.pt/wp-json/wp/v2/media?per_page=100&page=N&media_type=application`,
+com os totais nos cabeçalhos `X-WP-Total` e `X-WP-TotalPages`. Extrair números
+de dentro dos PDF é outro projecto e sai da stdlib.
+
+Ressalva de conteúdo que desqualifica a fonte para o nosso uso: as fact sheets
+municipais **agrupam os concelhos pequenos** (Alcoutim com Castro Marim e São
+Brás; Aljezur com Monchique e Vila do Bispo). Nunca se obtêm os 16 concelhos
+separados a partir do MONITUR.
+
+Fica adiado. É um índice de acervo, não uma série.
+
+### 7.4 DGEEC, inscritos na UAlg: viável, mas caro; adiado
+
+Os dados são excelentes e o ficheiro é parseável em stdlib, mas a descoberta dos
+identificadores não é.
+
+O ficheiro de 2024/2025 está em `https://www.dgeec.medu.pt/api/ficheiros/`
+`68f89c06c82132f5733ead7b`, confirmado HTTP 200, formato ODS de 9,7 MB (há
+também `.xlsb`, que é binário proprietário e impossível em stdlib). Duas folhas,
+cabeçalho na linha 2, 38 colunas, 173 644 linhas. A UAlg isola-se pelo código de
+estabelecimento `0200` e desagrega-se por CNAEF a três níveis. Total apurado
+para 2024/2025: 10 551 inscritos, com Faro 10 155 e Portimão 396.
+
+Duas ressalvas pesadas. O `content.xml` descomprime para **851 MB**, o que
+obriga a parsing em streaming e não a `ET.parse()`, e cada ano leva cerca de 70
+segundos. E o site é uma SPA React cuja API devolve **JSON cifrado em AES-256-CBC**
+(chave em claro no bundle público, portanto ofuscação de conteúdo público e não
+autenticação), o que impede um cliente de descoberta em stdlib. A recomendação é
+codificar a tabela de 21 anos para identificador de ficheiro e revê-la uma vez
+por ano em Outubro ou Dezembro; o `/api/ficheiros/<id>` não é cifrado.
+
+Nota de comparabilidade: o BeAlgarve publica 11 763 estudantes "no Algarve" para
+2024/2025, contra os 10 551 apurados para a Universidade do Algarve. A diferença
+são estabelecimentos privados na região. Definir bem qual dos dois se quer.
+
+O `dados.gov.pt` está podre para este dataset: os 14 recursos param em 2017/2018
+e apontam para hosts mortos.
+
+### 7.5 BeAlgarve: nunca por código
+
+Verificado com seis pedidos: é PHP renderizado no servidor, não é SPA, e **não
+consome nenhum endpoint de dados**. Zero ocorrências de `fetch(`,
+`XMLHttpRequest` ou `axios` em todos os chunks; zero referências a `/api/`, a
+`.json` ou a `.csv`. O directório filtra no cliente sobre HTML já presente, via
+atributos `data-directory-*`, e as entidades vêm embebidas pelo PHP. Extrair
+significaria fazer parsing de marcação que pode mudar sem aviso. Não
+implementar. A via é institucional, via NERA.
+
+**A matriz deles serve de checklist**, e está em
+`bealgarve.pt/pt/informacao-estatistica/`: 9 dimensões, 53 indicadores, 48
+séries carregadas. Três leituras úteis. Primeiro, os indicadores de habitação e
+de ensino superior deles são exactamente as fontes que validámos, e nós
+conseguimos produzi-los ao concelho enquanto eles só publicam ao nível Algarve.
+Segundo, não há um único indicador de energia na matriz. Terceiro, o único
+indicador semanal deles é o volume armazenado nas barragens (APA/SNIRH), que é o
+sinal mais vivo de toda a matriz e vale a pena considerar.
+
+## 8. Higiene do repositório
+
+A tarefa 0 da Fase 1b ficou feita: o ficheiro de exclusões passou de `gitignore`
+para `.gitignore`, e `monitor.db` e `entidades.db` saíram do versionamento com
+`git rm --cached`, mantendo-se em disco. Confirmado com `git check-ignore -v`,
+que agora aponta os dois ficheiros para a regra `*.db` da linha 2.
