@@ -566,6 +566,331 @@ def recolher_opensky(con, n_dias):
     return total
 
 
+# =========================================================== FASE 1b: EMPRESAS
+# Camada A do SPEC_fase1b: retrato anual autoritativo do tecido empresarial,
+# por concelho e por seccao CAE Rev.3. Convencao de ambito: 'Concelho|SECCAO'
+# (ex.: 'Faro|J'), ou 'regiao|SECCAO' para as series so disponiveis a NUTS2.
+
+INICIO_EMPRESAS = 2015
+
+# Seccoes CAE Rev.3 tal como a SCIE e a Demografia das Empresas as publicam.
+# K, O, T e U nao existem nestes indicadores (a SCIE nao cobre financeiras,
+# administracao publica, familias empregadoras nem organismos internacionais).
+SECCOES_SCIE = ["TOT", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+                "L", "M", "N", "P", "Q", "R", "S"]
+# As Contas Regionais (VAB, agregado A21) tem as 21 seccoes completas.
+SECCOES_A21 = SECCOES_SCIE + ["K", "O", "T", "U"]
+
+# Agregacao sectorial para o painel. Definida ao nivel de SECCAO, de proposito:
+# a spec pedia tech = J + 62/63 + M72 e turismo = I + N79, mas os indicadores de
+# Demografia das Empresas (nascimentos e mortes) so publicam seccoes, sem
+# divisoes. Manter tudo a seccao e o que garante que a identidade contabilistica
+# stock(n) ~ stock(n-1) + nascimentos - mortes fecha por sector. As divisoes 62 e
+# 63 ja estao dentro de J; ficam de fora M72 (I&D), N79 (agencias de viagens) e
+# C10-C11 (industrias alimentares), que nao sao separaveis a este nivel.
+SECTORES = {
+    "tech": ["J"],
+    "turismo": ["I"],
+    "construcao": ["F", "L"],
+    "comercio": ["G"],
+    "agro_mar": ["A"],
+    "outros": ["B", "C", "D", "E", "H", "M", "N", "P", "Q", "R", "S"],
+}
+SECTOR_ROTULOS = {
+    "todos": "Todos os sectores", "tech": "Tecnologia (CAE J)",
+    "turismo": "Turismo (CAE I)", "construcao": "Construção e imobiliário",
+    "comercio": "Comércio", "agro_mar": "Agro-alimentar e mar",
+    "outros": "Outros sectores",
+}
+
+# (serie, unidade, [(varcd, ano_min, ano_max ou None)], extras, factor)
+# O indicador corrente vem primeiro. As mortes de 2021 e 2022 vem do 0014101 e
+# NAO do 0009705: no indicador antigo eram provisorias/estimativa e divergem ate
+# 8,5% dos valores definitivos publicados em 2025.
+INE_EMPRESAS = [
+    ("empresas_stock", "n",
+     [("0014063", 2023, None), ("0008511", INICIO_EMPRESAS, 2022)],
+     {"Dim4": "T"}, 1.0),
+    ("empresas_nascimentos", "n",
+     [("0014099", 2023, None), ("0009703", INICIO_EMPRESAS, 2022)], {}, 1.0),
+    ("empresas_mortes", "n",
+     [("0014101", 2021, None), ("0009705", INICIO_EMPRESAS, 2020)], {}, 1.0),
+    ("empresas_vn", "eur",
+     [("0013862", 2023, None), ("0008513", INICIO_EMPRESAS, 2022)], {}, 1.0),
+    ("empresas_pessoal", "n",
+     [("0013861", 2023, None), ("0008512", INICIO_EMPRESAS, 2022)], {}, 1.0),
+]
+# VAB por ramo, Contas Regionais: so existe ate NUTS2. Potencia10=6, ou seja os
+# valores vem em milhoes de euros; convertemos para euros para bater com o VN.
+INE_VAB = ("vab_sector", "eur", "0014115", 1e6)
+
+# Fluxo mensal por seccao CAE (o pulso, ja que o registo empresa a empresa do
+# Portal MJ esta fechado a automacao - ver NOTAS_dados.md).
+INE_EMPRESAS_MENSAL = [
+    ("constituicoes_mes", "n", "0012244"),
+    ("dissolucoes_mes", "n", "0012245"),
+]
+
+# Tabela de registo individual. Fica criada e VAZIA: a decisao de 2026-08-05 foi
+# adiar a identidade das empresas, porque o publicacoes.mj.pt tem reCAPTCHA e
+# NoBot no unico ponto de pesquisa e a propria spec manda parar nesse caso.
+SCHEMA_EMPRESAS = """
+CREATE TABLE IF NOT EXISTS empresas_registo (
+    nipc TEXT PRIMARY KEY,
+    nome TEXT NOT NULL,
+    natureza TEXT,
+    morada TEXT,
+    concelho TEXT,
+    capital_social REAL,
+    objeto TEXT,
+    cae TEXT,
+    cae_seccao TEXT,
+    acto TEXT NOT NULL,
+    data_acto TEXT NOT NULL,
+    relevancia_tech INTEGER,
+    relevancia_justif TEXT,
+    fonte_url TEXT,
+    recolhido_em TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_emp_concelho ON empresas_registo(concelho);
+CREATE INDEX IF NOT EXISTS idx_emp_data ON empresas_registo(data_acto);
+"""
+
+
+def ine_codigos_validos(meta, dim_num):
+    """Codigos realmente aceites numa dimensao. Evita rebentar o lote inteiro:
+    um unico codigo invalido em Dim faz a API devolver Cod=4 para tudo."""
+    # Formato real: Dimensoes.Categoria_Dim e uma lista com um unico dicionario
+    # cujas chaves sao 'Dim_Num<N>_<cat_id>' e os valores listas de categorias.
+    out = set()
+    for bloco in meta.get("Dimensoes", {}).get("Categoria_Dim", []):
+        if not isinstance(bloco, dict):
+            continue
+        for chave, cats in bloco.items():
+            if not chave.startswith(f"Dim_Num{dim_num}_"):
+                continue
+            for c in (cats if isinstance(cats, list) else [cats]):
+                if str(c.get("dim_num")) == str(dim_num):
+                    out.add(str(c.get("categ_cod")))
+    return out
+
+
+def _anos(meta, ano_min, ano_max):
+    p2 = iso_do_periodo_ine(meta.get("UltimoPeriodo", "")) or ""
+    p1 = iso_do_periodo_ine(meta.get("PrimeiroPeriodo", "")) or ""
+    if not p1[:4].isdigit() or not p2[:4].isdigit():
+        return []
+    lo = max(int(p1[:4]), ano_min)
+    hi = int(p2[:4]) if ano_max is None else min(int(p2[:4]), ano_max)
+    return [str(a) for a in range(lo, hi + 1)]
+
+
+def _gravar_cae(con, serie, unidade, dados, seccoes, factor, ambito_fixo=None):
+    linhas = []
+    for rot, registos in dados.items():
+        periodo = iso_do_rotulo(rot)
+        if not periodo:
+            continue
+        for reg in registos:
+            geo = reg.get("geocod", "")
+            if ambito_fixo:
+                if geo != "15":
+                    continue
+                base = ambito_fixo
+            else:
+                if geo not in CONCELHOS:
+                    continue
+                base = CONCELHOS[geo]
+            sec = reg.get("dim_3")
+            if sec not in seccoes:
+                continue
+            val = reg.get("valor")       # ausente = segredo estatistico
+            if val in (None, ""):
+                continue
+            linhas.append((serie, f"{base}|{sec}", periodo,
+                           float(val) * factor, unidade, "INE"))
+    return gravar(con, linhas)
+
+
+def recolher_ine_empresas(con):
+    total = 0
+    # --- Camada A: series por concelho e seccao CAE
+    for serie, unidade, indicadores, extras, factor in INE_EMPRESAS:
+        n, feitos = 0, set()
+        for varcd, ano_min, ano_max in indicadores:
+            try:
+                meta = ine_meta(varcd)
+            except Exception as e:
+                log(f"  ! {serie}/{varcd}: metadados falharam ({e})")
+                continue
+            anos = [a for a in _anos(meta, ano_min, ano_max) if a not in feitos]
+            if not anos:
+                continue
+            secs = ine_codigos_validos(meta, 3) or set(SECCOES_SCIE)
+            usar = [s for s in SECCOES_SCIE if s in secs]
+            for lote in lotes(anos, 10):
+                extra = {"Dim2": ",".join(GEOCODS), "Dim3": ",".join(usar)}
+                extra.update(extras)
+                try:
+                    dados = ine_dados(varcd,
+                                      [ine_codigo_periodo(a) for a in lote],
+                                      extra)
+                except Exception as e:
+                    log(f"  ! {serie}/{varcd} {lote[0]}..{lote[-1]}: {e}")
+                    continue
+                n += _gravar_cae(con, serie, unidade, dados, set(usar), factor)
+                feitos.update(lote)
+        log(f"  {serie}: {n} pontos ({len(feitos)} anos)")
+        total += n
+    # --- VAB sectorial, so NUTS2 Algarve
+    serie, unidade, varcd, factor = INE_VAB
+    try:
+        meta = ine_meta(varcd)
+        anos = _anos(meta, INICIO_EMPRESAS, None)
+        secs = ine_codigos_validos(meta, 3) or set(SECCOES_A21)
+        usar = [s for s in SECCOES_A21 if s in secs]
+        n = 0
+        for lote in lotes(anos, 12):
+            dados = ine_dados(varcd, [ine_codigo_periodo(a) for a in lote],
+                              {"Dim2": "15", "Dim3": ",".join(usar)})
+            n += _gravar_cae(con, serie, unidade, dados, set(usar), factor,
+                             ambito_fixo="regiao")
+        log(f"  {serie}: {n} pontos ({anos[0]}..{anos[-1]} em euros)")
+        total += n
+    except Exception as e:
+        log(f"  ! {serie}/{varcd}: {e}")
+    # --- Fluxo mensal por seccao CAE
+    for serie, unidade, varcd in INE_EMPRESAS_MENSAL:
+        try:
+            meta = ine_meta(varcd)
+        except Exception as e:
+            log(f"  ! {serie}/{varcd}: metadados falharam ({e})")
+            continue
+        p1 = iso_do_periodo_ine(meta.get("PrimeiroPeriodo", ""))
+        p2 = iso_do_periodo_ine(meta.get("UltimoPeriodo", ""))
+        if not p1 or not p2:
+            log(f"  ! {serie}/{varcd}: intervalo ilegivel")
+            continue
+        secs = ine_codigos_validos(meta, 3) or set(SECCOES_SCIE)
+        usar = [s for s in SECCOES_SCIE if s in secs]
+        periodos = meses_entre(max(p1, f"{INICIO_EMPRESAS}-01"), p2)
+        n = 0
+        for lote in lotes(periodos, 12):
+            try:
+                dados = ine_dados(varcd,
+                                  [ine_codigo_periodo(p) for p in lote],
+                                  {"Dim2": ",".join(GEOCODS),
+                                   "Dim3": ",".join(usar)})
+            except Exception as e:
+                log(f"  ! {serie}/{varcd} {lote[0]}..{lote[-1]}: {e}")
+                continue
+            n += _gravar_cae(con, serie, unidade, dados, set(usar), 1.0)
+        log(f"  {serie}: {n} pontos ({periodos[0]}..{periodos[-1]})")
+        total += n
+    return total
+
+
+# ------------------------------------------------- INE: precos da habitacao
+INE_HABITACAO = ("preco_habitacao", "eur_m2", "0012239")
+
+
+def recolher_habitacao(con):
+    serie, unidade, varcd = INE_HABITACAO
+    try:
+        meta = ine_meta(varcd)
+    except Exception as e:
+        log(f"  ! {serie}/{varcd}: metadados falharam ({e})")
+        return 0
+    # Dim1 trimestral: 'S5A' + AAAA + T. Ler os codigos reais dos metadados
+    # evita o Cod=4 que rebenta o lote quando se pede um trimestre inexistente.
+    codigos = sorted(c for c in ine_codigos_validos(meta, 1)
+                     if c.startswith("S5A") and c[3:7].isdigit()
+                     and int(c[3:7]) >= INICIO_ANO)
+    if not codigos:
+        log(f"  ! {serie}: sem periodos trimestrais nos metadados")
+        return 0
+    n = 0
+    for lote in lotes(codigos, 20):
+        try:
+            dados = ine_dados(varcd, lote,
+                              {"Dim2": ",".join(GEOCODS), "Dim3": "T"})
+        except Exception as e:
+            log(f"  ! {serie} {lote[0]}..{lote[-1]}: {e}")
+            continue
+        linhas = []
+        for rot, registos in dados.items():
+            periodo = trimestre_para_iso(rot)
+            if not periodo:
+                continue
+            for reg in registos:
+                geo = reg.get("geocod", "")
+                if geo not in CONCELHOS or reg.get("dim_3") != "T":
+                    continue
+                val = reg.get("valor")
+                if val in (None, ""):
+                    continue
+                linhas.append((serie, CONCELHOS[geo], periodo, float(val),
+                               unidade, "INE"))
+        n += gravar(con, linhas)
+    log(f"  {serie}: {n} pontos")
+    return n
+
+
+def trimestre_para_iso(rotulo):
+    """'1.º Trimestre de 2026' -> '2026-T1'."""
+    m = re.search(r"(\d)\D*\s*Trimestre\s+de\s+(\d{4})", rotulo, re.I)
+    return f"{m.group(2)}-T{m.group(1)}" if m else None
+
+
+# ----------------------------------------------------------------- E-Redes
+EREDES_DATASET = "3-consumos-faturados-por-municipio-ultimos-10-anos"
+EREDES_URL = ("https://e-redes.opendatasoft.com/api/explore/v2.1/catalog/"
+              f"datasets/{EREDES_DATASET}/exports/csv"
+              "?where=coddistrito%3D%2208%22&delimiter=%3B")
+DICO_CONCELHO = {c[3:]: n for c, n in CONCELHOS.items()}   # '0801' -> 'Albufeira'
+
+
+def recolher_eredes(con):
+    """Consumo facturado de electricidade por concelho e mes (kWh)."""
+    import csv
+    import io
+    try:
+        crus = obter(EREDES_URL, bruto=True)
+    except Exception as e:
+        log(f"  ! E-Redes: export indisponivel ({e})")
+        return 0
+    texto = crus.decode("utf-8", "replace")
+    leitor = csv.DictReader(io.StringIO(texto), delimiter=";")
+    soma, residual, linhas_lidas = {}, 0.0, 0
+    for lin in leitor:
+        linhas_lidas += 1
+        dico = (lin.get("coddistritoconcelho") or "").strip()
+        periodo = (lin.get("data") or "").strip()[:7]
+        try:
+            kwh = float(lin.get("energia_ativa_kwh") or 0)
+        except ValueError:
+            continue
+        if len(periodo) != 7:
+            continue
+        nome = DICO_CONCELHO.get(dico)
+        if not nome:
+            residual += kwh          # bucket '08--' OUTROS FARO (RGPD)
+            continue
+        soma[(nome, periodo)] = soma.get((nome, periodo), 0.0) + kwh
+    if not soma:
+        log(f"  ! E-Redes: {linhas_lidas} linhas lidas, nenhuma reconhecida")
+        return 0
+    linhas = [("consumo_electrico", nome, periodo, kwh, "kwh", "E-Redes")
+              for (nome, periodo), kwh in soma.items()]
+    n = gravar(con, linhas)
+    total_kwh = sum(soma.values())
+    pct = 100 * residual / (total_kwh + residual) if total_kwh else 0
+    periodos = sorted({p for _, p in soma})
+    log(f"  consumo_electrico: {n} pontos ({periodos[0]}..{periodos[-1]}); "
+        f"nao atribuido a concelho ('OUTROS FARO'): {pct:.1f}% do total")
+    return n
+
+
 # ------------------------------------------------------------------ comandos
 INICIO_ANO = 2019
 
@@ -573,6 +898,7 @@ INICIO_ANO = 2019
 def abrir():
     con = sqlite3.connect(DB)
     con.executescript(SCHEMA)
+    con.executescript(SCHEMA_EMPRESAS)
     con.commit()
     return con
 
@@ -611,6 +937,24 @@ def cmd_fetch(args):
             total += recolher_iefp(con, n_meses)
         except Exception as e:
             log(f"  ! IEFP abortou: {e}")
+    if fonte in ("todas", "empresas"):
+        log("INE (empresas: stock, nascimentos, mortes, VN, pessoal, VAB)...")
+        try:
+            total += recolher_ine_empresas(con)
+        except Exception as e:
+            log(f"  ! INE empresas abortou: {e}")
+    if fonte in ("todas", "habitacao"):
+        log("INE (preços da habitação por concelho)...")
+        try:
+            total += recolher_habitacao(con)
+        except Exception as e:
+            log(f"  ! INE habitação abortou: {e}")
+    if fonte in ("todas", "eredes"):
+        log("E-Redes (consumo de electricidade por concelho)...")
+        try:
+            total += recolher_eredes(con)
+        except Exception as e:
+            log(f"  ! E-Redes abortou: {e}")
     if fonte in ("todas", "opensky"):
         log("OpenSky (voos em Faro)...")
         try:
@@ -642,10 +986,18 @@ def cmd_stats(args):
     tot = con.execute("SELECT COUNT(*) FROM indicadores").fetchone()[0]
     amb = con.execute(
         "SELECT COUNT(DISTINCT ambito) FROM indicadores").fetchone()[0]
+    todos = [r[0] for r in con.execute(
+        "SELECT DISTINCT ambito FROM indicadores ORDER BY ambito")]
+    bases = sorted({a.split("|")[0] for a in todos})
+    seccoes = sorted({a.split("|")[1] for a in todos if "|" in a})
     log(f"\n{len(linhas)} séries · {amb} âmbitos distintos · {tot} pontos")
-    log("âmbitos: " + ", ".join(
-        r[0] for r in con.execute(
-            "SELECT DISTINCT ambito FROM indicadores ORDER BY ambito")))
+    log("âmbitos base: " + ", ".join(bases))
+    if seccoes:
+        log(f"secções CAE cruzadas com o âmbito ({len(seccoes)}): "
+            + ", ".join(seccoes))
+    n_emp = con.execute("SELECT COUNT(*) FROM empresas_registo").fetchone()[0]
+    log(f"empresas_registo: {n_emp} linhas"
+        + ("" if n_emp else "  (identidade das empresas adiada; ver NOTAS_dados.md)"))
     con.close()
 
 
