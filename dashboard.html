@@ -794,19 +794,38 @@ function empresas(){
       <div class="hom ${cls}">${vhTxt}<small>homóloga</small></div></div>`;
   }else pel.innerHTML="";
 
-  /* empresas novas (tabela empresas_registo) */
-  const nv=E.novas||[], nel=document.getElementById("empNovas");
-  nel.innerHTML=nv.length
-    ? `<h3 style="font:600 11px 'Spline Sans Mono';letter-spacing:.14em;text-transform:uppercase;color:var(--tinta2);margin-bottom:8px">Empresas novas</h3>`+
-      nv.filter(e=>!concelhoSel||e.concelho===concelhoSel).slice(0,20).map(e=>
-        `<div class="bar" style="grid-template-columns:1fr 90px 70px 60px">
-          <span>${e.nome}</span><span class="n">${e.concelho||""}</span>
-          <span class="n">${e.cae||"—"}</span>
-          <span class="n">${e.tech!=null?"tech "+e.tech:""}</span></div>`).join("")
-    : `<div class="vazio" style="padding:14px">Lista de empresas novas por identidade ainda sem fonte.
-       O portal de publicações do Ministério da Justiça tem reCAPTCHA e NoBot no único ponto de pesquisa,
-       por isso a recolha empresa a empresa ficou adiada (ver NOTAS_dados.md). Os fluxos acima vêm das
-       contagens mensais do INE por concelho e secção CAE.</div>`;
+  /* fluxo por sector nos ultimos 12 meses */
+  const nel=document.getElementById("empNovas");
+  const sC=S("constituicoes_mes"), sD=S("dissolucoes_mes");
+  if(sC){
+    const aC=sC.ambitos[base]||{}, aD=(sD&&sD.ambitos[base])||{};
+    const j12=a=>(a||[]).slice(-12).reduce((t,p)=>t+p[1],0);
+    const meses=(aC.todos||[]).slice(-12).map(p=>p[0]);
+    const per=meses.length?`${rotPeriodo(meses[0])} a ${rotPeriodo(meses[meses.length-1])}`:"";
+    const secs=Object.keys(E.sectores||{}).filter(k=>k!=="todos");
+    const linhas=secs.map(k=>[k,j12(aC[k]),j12(aD[k])])
+      .filter(l=>l[1]||l[2]).sort((x,y)=>y[1]-x[1]);
+    const max=Math.max(1,...linhas.map(l=>Math.max(l[1],l[2])));
+    nel.innerHTML=
+      `<h3 style="font:600 11px 'Spline Sans Mono';letter-spacing:.14em;text-transform:uppercase;color:var(--tinta2);margin-bottom:4px">Fluxo por sector, últimos 12 meses · ${base==="regiao"?"região":base}</h3>`+
+      `<div style="font:10px 'Spline Sans Mono';color:var(--tinta2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${per} · actos de registo de pessoas colectivas (INE/DGPJ)</div>`+
+      `<div class="bar" style="grid-template-columns:150px 1fr 66px 66px 62px;color:var(--tinta2);font-size:10px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--linha2);padding-bottom:5px">
+        <span>sector</span><span></span><span class="n">constit.</span><span class="n">dissol.</span><span class="n">saldo</span></div>`+
+      linhas.map(([k,c,d])=>{
+        const sal=c-d, act=k===sectorSel;
+        return `<div class="bar" style="grid-template-columns:150px 1fr 66px 66px 62px${act?";font-weight:600":""}">
+          <span>${E.sectores[k]}</span>
+          <span style="display:flex;gap:2px;align-items:center">
+            <i style="width:${c/max*50}%;background:var(--mare)"></i>
+            <i style="width:${d/max*50}%;background:var(--coral)"></i></span>
+          <span class="n">${fmtN(c)}</span><span class="n">${fmtN(d)}</span>
+          <span class="n" style="color:${sal>=0?"var(--mare)":"var(--coral)"}">${sal>=0?"+":"−"}${fmtN(Math.abs(sal))}</span></div>`;
+      }).join("")+
+      `<div style="margin-top:8px;font-size:11px;color:var(--tinta2)">Verde: constituições. Vermelho: dissoluções.
+        A identidade das empresas (nome, NIPC, objecto social) ainda não tem fonte: o portal de publicações do
+        Ministério da Justiça tem reCAPTCHA e NoBot no único ponto de pesquisa, por isso ficou adiada para
+        fonte licenciada. Ver NOTAS_dados.md §5.</div>`;
+  }else nel.innerHTML="";
 
   nota.innerHTML=`As setas trazem duas medidas que não são comparáveis entre si e não devem ser somadas:
     <em>nascimentos</em> e <em>mortes</em> são a demografia de empresas do INE, anual, e incluem
