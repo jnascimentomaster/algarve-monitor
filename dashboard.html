@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Algarve Monitor — Sala de Situação</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cal:#F6F8F7; --papel:#FFFFFF; --tinta:#15222D; --tinta2:#5A6A75;
+  --linha:#DFE5E2; --linha2:#EDF0EE;
+  --atlantico:#135E85; --mare:#1F8A7D; --ocre:#B97F1F; --coral:#C25A38;
+  --bruma:#67788A; --neutro:#B3BCC2;
+  --alerta:#8A2D0F;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--cal);color:var(--tinta);font:14px/1.45 "Archivo",system-ui,sans-serif}
+a{color:inherit}
+.mono{font-family:"Spline Sans Mono",ui-monospace,monospace}
+:focus-visible{outline:2px solid var(--atlantico);outline-offset:1px}
+h2{font:600 10.5px "Spline Sans Mono";letter-spacing:.2em;text-transform:uppercase;
+  color:var(--tinta2);margin-bottom:10px}
+
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 22px;
+  padding:20px 26px 14px;border-bottom:2px solid var(--tinta);background:var(--papel)}
+.marca{font-weight:900;font-stretch:120%;letter-spacing:.14em;text-transform:uppercase;
+  font-size:clamp(17px,2.6vw,23px)}
+.marca span{color:var(--atlantico)}
+.sub{font-size:11px;color:var(--tinta2);letter-spacing:.08em;text-transform:uppercase}
+header .mono{font-size:11px;color:var(--tinta2);margin-left:auto}
+
+/* ticker */
+.ticker{background:var(--tinta);color:#EDF2F0;overflow:hidden;white-space:nowrap;position:relative}
+.ticker .faixa{display:inline-block;padding:7px 0;animation:desliza 60s linear infinite}
+.ticker:hover .faixa{animation-play-state:paused}
+@keyframes desliza{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion: reduce){
+  .ticker{overflow-x:auto}.ticker .faixa{animation:none;padding-right:20px}}
+.ticker .t{font:500 12px "Spline Sans Mono";margin:0 26px}
+.ticker .t b{color:#FFD489}
+.ticker .t .tipo{color:#8FD0C6}
+
+main{max-width:1240px;margin:0 auto;padding:20px 26px 70px;display:grid;gap:16px}
+.painel{background:var(--papel);border:1px solid var(--linha);border-radius:5px;padding:16px 18px}
+.g2{display:grid;grid-template-columns:1.15fr 1fr;gap:16px}
+.g2b{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.g2,.g2b{grid-template-columns:1fr}main,header{padding-left:14px;padding-right:14px}}
+
+/* mapa */
+.mapa-topo{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.mapa-topo select{margin-left:auto;padding:4px 8px;border:1px solid var(--linha);
+  border-radius:4px;font:12px "Archivo";background:var(--papel);color:var(--tinta)}
+#mapa path{stroke:var(--papel);stroke-width:.8;cursor:pointer;transition:opacity .12s}
+#mapa path:hover{opacity:.75}
+#mapa path.activo{stroke:var(--tinta);stroke-width:1.6}
+#tooltip{position:fixed;pointer-events:none;background:var(--tinta);color:#fff;
+  font:12px "Spline Sans Mono";padding:5px 9px;border-radius:4px;opacity:0;z-index:9}
+.legenda{display:flex;gap:4px;align-items:center;font:11px "Spline Sans Mono";
+  color:var(--tinta2);margin-top:8px}
+.legenda i{width:26px;height:9px;border-radius:2px;display:inline-block}
+.mapa-nota{font-size:11px;color:var(--tinta2);margin-top:6px}
+.limpar{border:1px solid var(--tinta);background:none;border-radius:99px;
+  padding:2px 10px;font:600 11px "Archivo";cursor:pointer;display:none}
+.limpar.on{display:inline-block}
+
+/* situacao */
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.kpi{border:1px solid var(--linha2);border-radius:4px;padding:10px 12px}
+.kpi .v{font:600 22px/1.1 "Archivo";font-stretch:112%}
+.kpi .v small{font-size:13px;color:var(--tinta2)}
+.kpi .r{font:11px "Spline Sans Mono";color:var(--tinta2);text-transform:uppercase;
+  letter-spacing:.08em;margin-top:2px}
+.brief-nota{margin-top:12px;border-top:1px dashed var(--linha);padding-top:10px;
+  font-size:12.5px;color:var(--tinta2)}
+
+/* sinais */
+.sinal{display:grid;grid-template-columns:112px 1fr;gap:10px;padding:10px 2px;
+  border-top:1px solid var(--linha2)}
+.sinal:first-of-type{border-top:none}
+.sinal .esq{text-align:right}
+.sinal .mont{font:600 15px "Spline Sans Mono";color:var(--alerta)}
+.sinal .tipo{font:600 9.5px "Spline Sans Mono";letter-spacing:.06em;
+  text-transform:uppercase;color:var(--tinta2);display:block;margin-top:2px}
+.sinal h3{font-size:13.5px;font-weight:600;line-height:1.35}
+.sinal h3 a{text-decoration:none}
+.sinal h3 a:hover{text-decoration:underline;text-decoration-color:var(--atlantico)}
+.sinal .meta{font:11px "Spline Sans Mono";color:var(--tinta2);margin-top:2px}
+.sinal .meta .mun{color:var(--atlantico);font-weight:600}
+
+/* tendencias */
+.tend{display:grid;grid-template-columns:78px 1fr 30px;gap:8px;align-items:end;
+  padding:6px 0;font:11.5px "Archivo";color:var(--tinta2)}
+.tend .semanas{display:flex;gap:2px;align-items:flex-end;height:30px}
+.tend .semanas i{flex:1;border-radius:1px 1px 0 0;min-height:2px}
+.tend .n{font-family:"Spline Sans Mono";text-align:right;color:var(--tinta)}
+
+/* chips de categoria (filtro global) */
+.chip{border:1.5px solid var(--linha);background:var(--papel);border-radius:99px;
+  padding:3px 11px;font:600 11.5px "Archivo";cursor:pointer;color:var(--tinta2)}
+.chip[aria-pressed="true"]{color:#fff;border-color:transparent}
+.chip[data-c="tech"][aria-pressed="true"]{background:var(--atlantico)}
+.chip[data-c="inovacao"][aria-pressed="true"]{background:var(--mare)}
+.chip[data-c="negocios"][aria-pressed="true"]{background:var(--ocre)}
+.chip[data-c="turismo"][aria-pressed="true"]{background:var(--coral)}
+.chip[data-c="regional"][aria-pressed="true"]{background:var(--bruma)}
+.chip[data-c="irrelevante"][aria-pressed="true"]{background:var(--neutro)}
+.chips-cat{display:flex;gap:6px;flex-wrap:wrap}
+
+/* barra de datas */
+.barra-datas{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center;padding:10px 18px}
+.barra-datas label{font-size:12px;color:var(--tinta2);display:flex;gap:6px;align-items:center}
+.barra-datas input[type=date]{padding:4px 8px;border:1px solid var(--linha);
+  border-radius:4px;font:12px "Spline Sans Mono";background:var(--papel);color:var(--tinta)}
+.barra-datas .mono{font-size:11px;color:var(--tinta2);margin-left:auto}
+
+/* ranking */
+.rk{display:grid;grid-template-columns:22px 1fr 90px 34px;gap:8px;align-items:center;
+  padding:5px 0;border-top:1px solid var(--linha2);font-size:12.5px;cursor:pointer;
+  background:none;border-left:none;border-right:none;border-bottom:none;width:100%;text-align:left}
+.rk:first-of-type{border-top:none}
+.rk:hover .nome{text-decoration:underline}
+.rk .pos{font:600 11px "Spline Sans Mono";color:var(--tinta2)}
+.rk .nome{font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.rk .nome small{font-weight:400;color:var(--tinta2);font-size:10px;text-transform:uppercase;
+  letter-spacing:.05em;margin-left:5px}
+.rk .barra-r{height:8px;border-radius:2px;background:var(--atlantico)}
+.rk .n{font:600 12px "Spline Sans Mono";text-align:right;color:var(--tinta)}
+
+/* grafo */
+#grafo{width:100%;height:320px;display:block}
+.grafo-nota{font-size:11px;color:var(--tinta2)}
+
+/* arquivo */
+details.arquivo{background:var(--papel);border:1px solid var(--linha);border-radius:5px}
+details.arquivo summary{padding:13px 18px;cursor:pointer;
+  font:600 11px "Spline Sans Mono";letter-spacing:.18em;text-transform:uppercase;color:var(--tinta2)}
+details.arquivo>div{padding:0 18px 16px}
+.filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.filtros input[type=search]{flex:1;min-width:150px;padding:6px 10px;
+  border:1px solid var(--linha);border-radius:5px;font:13px "Archivo";background:var(--papel)}
+.filtros select,.filtros input[type=number]{padding:5px 8px;border:1px solid var(--linha);
+  border-radius:5px;font:12.5px "Archivo";background:var(--papel)}
+.filtros label{font-size:12px;color:var(--tinta2);display:flex;gap:6px;align-items:center}
+.item{padding:10px 2px;border-top:1px solid var(--linha2)}
+.item .meta{display:flex;flex-wrap:wrap;gap:8px;font:10.5px "Spline Sans Mono";
+  color:var(--tinta2);margin-bottom:2px;align-items:center}
+.cat{font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.cat.tech{color:var(--atlantico)}.cat.inovacao{color:var(--mare)}
+.cat.negocios{color:var(--ocre)}.cat.turismo{color:var(--coral)}
+.cat.regional{color:var(--bruma)}.cat.irrelevante{color:var(--neutro)}
+.item h3{font-size:13.5px;font-weight:600}
+.item h3 a{text-decoration:none}
+.item h3 a:hover{text-decoration:underline}
+.vazio{padding:24px;text-align:center;color:var(--tinta2);font-size:13px}
+.mais{margin:12px auto 0;display:block;padding:7px 20px;border:1px solid var(--tinta);
+  background:none;border-radius:99px;font:600 12px "Archivo";cursor:pointer}
+.mais:hover{background:var(--tinta);color:#fff}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="marca">Algarve<span>&nbsp;Monitor</span></div>
+    <div class="sub">Sala de situação · ecossistema de inovação e economia</div>
+  </div>
+  <div class="mono" id="gerado"></div>
+</header>
+<div class="ticker" aria-label="Sinais em destaque"><div class="faixa" id="ticker"></div></div>
+
+<main>
+  <div class="painel barra-datas">
+    <h2 style="margin:0">Período</h2>
+    <label>de <input type="date" id="dataDe"></label>
+    <label>até <input type="date" id="dataAte"></label>
+    <button class="limpar on" id="limparDatas">todo o período</button>
+    <div class="chips-cat" id="catChips" role="group" aria-label="Filtro global de categorias"></div>
+    <span class="mono" id="periodoNota"></span>
+  </div>
+  <div class="g2">
+    <section class="painel">
+      <div class="mapa-topo">
+        <h2>Mapa dos concelhos</h2>
+        <button class="limpar" id="limpar">limpar filtro ✕</button>
+        <select id="camada" aria-label="Camada do mapa">
+          <option value="itens">camada: itens</option>
+          <option value="sinais" selected>camada: sinais</option>
+          <option value="montante">camada: € identificados</option>
+        </select>
+      </div>
+      <svg id="mapa" viewBox="0 0 720 340" role="img" aria-label="Mapa coropleto do Algarve"></svg>
+      <div class="legenda" id="legenda"></div>
+      <div class="mapa-nota" id="mapaNota"></div>
+    </section>
+
+    <section class="painel">
+      <h2>Situação</h2>
+      <div class="kpis" id="kpis"></div>
+      <div class="brief-nota">O brief diário gerado por IA liga aqui quando o módulo
+        <span class="mono">brief.py</span> entrar (síntese das últimas 24h sobre estes sinais).</div>
+    </section>
+  </div>
+
+  <section class="painel">
+    <h2>Livro de sinais — acontecimentos concretos, não artigos</h2>
+    <div id="sinais"></div>
+    <button class="mais" id="maisSinais" hidden>Mostrar mais sinais</button>
+  </section>
+
+  <div class="g2b">
+    <section class="painel">
+      <h2>Tendências — itens por semana e categoria</h2>
+      <div id="tendencias"></div>
+    </section>
+    <section class="painel">
+      <h2>Ranking de entidades — nº de menções</h2>
+      <div id="ranking"></div>
+    </section>
+  </div>
+
+  <section class="painel">
+    <h2>Rede de entidades — co-menções nas notícias</h2>
+    <canvas id="grafo"></canvas>
+    <div class="grafo-nota">Nós: entidades mais mencionadas (empresas e organizações),
+      tamanho proporcional às menções; ligações: aparecem no mesmo item. Passa o rato para ler.</div>
+  </section>
+
+  <details class="arquivo">
+    <summary>Arquivo de itens classificados</summary>
+    <div>
+      <div class="filtros">
+        <input type="search" id="pesquisa" placeholder="Pesquisar" aria-label="Pesquisar">
+        <label>rel ≥ <input type="number" id="relMin" min="0" max="10" value="5" style="width:52px"></label>
+        <label>âmbito <select id="ambitoSel">
+          <option value="algarve">Algarve</option><option value="todos">Todos</option>
+          <option value="fora">Fora / por localizar</option></select></label>
+      </div>
+      <div id="lista"></div>
+      <button class="mais" id="mais" hidden>Mostrar mais</button>
+    </div>
+  </details>
+</main>
+<div id="tooltip"></div>
+
+<script src="dados.js"></script>
+<script src="geo.js"></script>
+<script>
+const D = window.DADOS||{itens:[],total:0,gerado_em:""};
+const GEO = window.GEO||{features:[]};
+const CATS=["tech","inovacao","negocios","turismo","regional"];
+const CORES={tech:"#135E85",inovacao:"#1F8A7D",negocios:"#B97F1F",
+  turismo:"#C25A38",regional:"#67788A",irrelevante:"#B3BCC2"};
+const ROT={tech:"tech",inovacao:"inovação",negocios:"negócios",turismo:"turismo",
+  regional:"regional",irrelevante:"irrelevante"};
+const SINAL_ROT={investimento:"investimento",financiamento_publico:"financ. público",
+  aquisicao:"aquisição",nova_empresa_ou_abertura:"nova empresa / abertura",
+  expansao_ou_contratacao:"expansão / contratação",encerramento_ou_saida:"encerramento",
+  parceria:"parceria",nomeacao:"nomeação",evento_anunciado:"evento",
+  dados_ou_estudo:"dados / estudo"};
+let concelhoSel=null, nSinais=14, nItens=40;
+
+/* filtro global de periodo */
+function periodo(){
+  const de=document.getElementById("dataDe").value||"";
+  const ate=document.getElementById("dataAte").value||"";
+  return {de:/^\d{4}-/.test(de)?de:null, ate:/^\d{4}-/.test(ate)?ate:null};
+}
+function noPeriodo(i){
+  const p=periodo(), d=(i.publicado_em||"").slice(0,10);
+  if(p.de&&(!d||d<p.de))return false;
+  if(p.ate&&(!d||d>p.ate+"~"))return false;
+  return true;
+}
+let catsActivas=new Set(["tech","inovacao","negocios","turismo","regional"]);
+function itensP(){return D.itens.filter(i=>noPeriodo(i)&&catsActivas.has(i.categoria))}
+
+// chips de categoria: filtro global sobre todo o dashboard
+(function(){
+  const el=document.getElementById("catChips");
+  ["tech","inovacao","negocios","turismo","regional","irrelevante"].forEach(c=>{
+    const b=document.createElement("button");
+    b.className="chip";b.dataset.c=c;b.textContent=ROT[c];
+    b.setAttribute("aria-pressed",catsActivas.has(c));
+    b.onclick=()=>{catsActivas.has(c)?catsActivas.delete(c):catsActivas.add(c);
+      b.setAttribute("aria-pressed",catsActivas.has(c));
+      nSinais=14;nItens=40;refresca();};
+    el.appendChild(b);
+  });
+})();
+
+const fmtEUR=v=>v>=1e6?(v/1e6).toLocaleString("pt-PT",{maximumFractionDigits:1})+" M€"
+  :v>=1e3?Math.round(v/1e3)+" mil €":v+" €";
+const noAlgarve=i=>!["fora_do_algarve","indeterminado"].includes(i.municipio);
+const comSinal=i=>i.sinal&&i.sinal!=="nenhum"&&noAlgarve(i)&&i.categoria!=="irrelevante";
+
+document.getElementById("gerado").textContent=
+  "gerado "+(D.gerado_em||"").slice(0,16).replace("T"," ")+" UTC · "+D.total+" itens";
+
+/* ---------- ticker ---------- */
+function ticker(){
+  const top=itensP().filter(i=>comSinal(i)&&(i.montante_eur||i.relevancia>=8))
+    .sort((a,b)=>(b.montante_eur||0)-(a.montante_eur||0)).slice(0,18);
+  const html=top.map(i=>`<span class="t">${i.montante_eur?`<b>${fmtEUR(i.montante_eur)}</b> · `:""}
+    <span class="tipo">${SINAL_ROT[i.sinal]||i.sinal}</span> · ${i.titulo.slice(0,70)}
+    · ${i.municipio==="regiao"?"região":i.municipio}</span>`).join("·");
+  document.getElementById("ticker").innerHTML=html+html; // loop continuo
+}
+
+/* ---------- mapa ---------- */
+const svg=document.getElementById("mapa"), tt=document.getElementById("tooltip");
+function proj(){
+  let minx=99,maxx=-99,miny=99,maxy=-99;
+  const varre=c=>{if(typeof c[0]==="number"){minx=Math.min(minx,c[0]);maxx=Math.max(maxx,c[0]);
+      miny=Math.min(miny,c[1]);maxy=Math.max(maxy,c[1]);}else c.forEach(varre)};
+  GEO.features.forEach(f=>varre(f.geometry.coordinates));
+  const k=Math.cos(37.2*Math.PI/180), W=720,H=340,m=8;
+  const sx=(W-2*m)/((maxx-minx)*k), sy=(H-2*m)/(maxy-miny), s=Math.min(sx,sy);
+  return ([x,y])=>[m+(x-minx)*k*s, H-m-(y-miny)*s];
+}
+const P=proj();
+function anel(a){return a.map((c,i)=>(i?"L":"M")+P(c).map(v=>v.toFixed(1)).join(" ")).join("")+"Z"}
+function caminho(g){
+  if(g.type==="Polygon")return g.coordinates.map(anel).join("");
+  return g.coordinates.map(p=>p.map(anel).join("")).join("");
+}
+function contagens(){
+  const c={};
+  itensP().forEach(i=>{
+    if(!noAlgarve(i)||i.municipio==="regiao")return;
+    const m=i.municipio;c[m]=c[m]||{itens:0,sinais:0,montante:0};
+    c[m].itens++;
+    if(comSinal(i)){c[m].sinais++;c[m].montante+=i.montante_eur||0;}
+  });return c;
+}
+function corEscala(t,max){ // branco-cal -> atlantico
+  if(!max)return "#EDF1EF";
+  const p=Math.pow(t/max,.6);
+  const mix=(a,b)=>Math.round(a+(b-a)*p);
+  return `rgb(${mix(237,19)},${mix(241,94)},${mix(239,133)})`;
+}
+function mapa(){
+  const camada=document.getElementById("camada").value;
+  const c=contagens(), vals=Object.values(c).map(x=>x[camada==="montante"?"montante":camada]);
+  const max=Math.max(0,...vals);
+  svg.innerHTML="";
+  GEO.features.forEach(f=>{
+    const nome=f.properties.nome, v=(c[nome]||{})[camada==="montante"?"montante":camada]||0;
+    const p=document.createElementNS("http://www.w3.org/2000/svg","path");
+    p.setAttribute("d",caminho(f.geometry));
+    p.setAttribute("fill",corEscala(v,max));
+    if(nome===concelhoSel)p.classList.add("activo");
+    p.setAttribute("tabindex","0");
+    p.setAttribute("aria-label",nome);
+    const info=()=>`${nome} — ${ (c[nome]||{itens:0}).itens } itens · ${(c[nome]||{sinais:0}).sinais} sinais`+
+      ((c[nome]||{}).montante?` · ${fmtEUR(c[nome].montante)}`:"");
+    p.addEventListener("mousemove",e=>{tt.style.opacity=1;tt.textContent=info();
+      tt.style.left=(e.clientX+12)+"px";tt.style.top=(e.clientY+12)+"px";});
+    p.addEventListener("mouseleave",()=>tt.style.opacity=0);
+    p.addEventListener("click",()=>{concelhoSel=concelhoSel===nome?null:nome;refresca();});
+    p.addEventListener("keydown",e=>{if(e.key==="Enter"){concelhoSel=concelhoSel===nome?null:nome;refresca();}});
+    svg.appendChild(p);
+  });
+  document.getElementById("legenda").innerHTML=
+    `<span>0</span><i style="background:${corEscala(0,1)}"></i><i style="background:${corEscala(.35,1)}"></i>`+
+    `<i style="background:${corEscala(.7,1)}"></i><i style="background:${corEscala(1,1)}"></i>`+
+    `<span>${camada==="montante"?fmtEUR(max):max}</span>`;
+  const reg=itensP().filter(i=>i.municipio==="regiao").length;
+  const fora=itensP().filter(i=>!noAlgarve(i)).length;
+  document.getElementById("mapaNota").textContent=
+    `Fora do mapa: ${reg} itens de âmbito regional · ${fora} fora do Algarve ou por localizar. Clica num concelho para filtrar tudo.`;
+  const b=document.getElementById("limpar");
+  b.classList.toggle("on",!!concelhoSel);
+  b.onclick=()=>{concelhoSel=null;refresca();};
+}
+
+/* ---------- situacao ---------- */
+function kpis(){
+  const bs=itensP().filter(i=>!concelhoSel||i.municipio===concelhoSel);
+  const sin=bs.filter(comSinal);
+  const tot=sin.reduce((s,i)=>s+(i.montante_eur||0),0);
+  const porC={};bs.filter(i=>noAlgarve(i)&&i.municipio!=="regiao")
+    .forEach(i=>porC[i.municipio]=(porC[i.municipio]||0)+1);
+  const topC=Object.entries(porC).sort((a,b)=>b[1]-a[1])[0];
+  const ents=new Set();bs.forEach(i=>(i.entidades||[]).forEach(e=>{
+    if(e.tipo!=="pessoa")ents.add(e.nome)}));
+  document.getElementById("kpis").innerHTML=
+    `<div class="kpi"><div class="v">${sin.length}</div><div class="r">sinais no arquivo</div></div>`+
+    `<div class="kpi"><div class="v">${tot?fmtEUR(tot):"—"}</div><div class="r">€ identificados</div></div>`+
+    `<div class="kpi"><div class="v">${topC?topC[0]:"—"} <small>${topC?topC[1]:""}</small></div><div class="r">concelho mais activo</div></div>`+
+    `<div class="kpi"><div class="v">${ents.size}</div><div class="r">entidades distintas</div></div>`;
+}
+
+/* ---------- sinais ---------- */
+function sinais(){
+  const lst=itensP().filter(comSinal)
+    .filter(i=>!concelhoSel||i.municipio===concelhoSel)
+    .sort((a,b)=>(b.montante_eur||0)-(a.montante_eur||0)||b.relevancia-a.relevancia);
+  const el=document.getElementById("sinais");
+  el.innerHTML=lst.length?"":"<div class='vazio'>Sem sinais neste filtro. Os sinais aparecem depois da reclassificação com o schema novo.</div>";
+  lst.slice(0,nSinais).forEach(i=>{
+    const d=document.createElement("article");d.className="sinal";
+    const ents=(i.entidades||[]).filter(e=>e.tipo!=="pessoa").map(e=>e.nome).slice(0,3).join(" · ");
+    d.innerHTML=`<div class="esq">
+        <span class="mont">${i.montante_eur?fmtEUR(i.montante_eur):""}</span>
+        <span class="tipo">${SINAL_ROT[i.sinal]||i.sinal}</span></div>
+      <div><h3><a href="${i.url}" target="_blank" rel="noopener">${i.titulo}</a></h3>
+        <div class="meta"><span class="mun">${i.municipio==="regiao"?"região":i.municipio}</span>
+        ${ents?" · "+ents:""} · ${i.fonte||""} · ${(i.publicado_em||"").slice(0,10)}</div></div>`;
+    el.appendChild(d);
+  });
+  const b=document.getElementById("maisSinais");
+  b.hidden=lst.length<=nSinais;
+  b.onclick=()=>{nSinais+=14;sinais();};
+}
+
+/* ---------- tendencias ---------- */
+function tendencias(){
+  const base=itensP().filter(i=>noAlgarve(i)&&(!concelhoSel||i.municipio===concelhoSel));
+  const semana=d=>{if(!d)return null;const t=new Date(d);
+    const j=new Date(Date.UTC(t.getUTCFullYear(),0,1));
+    return t.getUTCFullYear()+"-"+String(Math.ceil(((t-j)/864e5+1)/7)).padStart(2,"0");};
+  const sems=[...new Set(base.map(i=>semana(i.publicado_em)).filter(Boolean))].sort().slice(-10);
+  const el=document.getElementById("tendencias");el.innerHTML="";
+  CATS.forEach(c=>{
+    const conta=sems.map(s=>base.filter(i=>i.categoria===c&&semana(i.publicado_em)===s).length);
+    const max=Math.max(1,...conta), tot=conta.reduce((a,b)=>a+b,0);
+    const div=document.createElement("div");div.className="tend";
+    div.innerHTML=`<span>${ROT[c]}</span>
+      <div class="semanas">${conta.map(v=>`<i style="height:${v/max*100}%;background:${CORES[c]}" title="${v}"></i>`).join("")}</div>
+      <span class="n">${tot}</span>`;
+    el.appendChild(div);
+  });
+}
+
+/* ---------- grafo de co-mencoes ---------- */
+function grafo(){
+  const cv=document.getElementById("grafo");
+  const W=cv.clientWidth||560,H=320;cv.width=W*2;cv.height=H*2;
+  const cx=cv.getContext("2d");cx.scale(2,2);
+  const base=itensP().filter(i=>noAlgarve(i)&&(!concelhoSel||i.municipio===concelhoSel));
+  const conta={},pares={};
+  base.forEach(i=>{
+    const es=[...new Set((i.entidades||[]).filter(e=>e.tipo!=="pessoa").map(e=>e.nome))];
+    es.forEach(n=>conta[n]=(conta[n]||0)+1);
+    for(let a=0;a<es.length;a++)for(let b=a+1;b<es.length;b++){
+      const k=[es[a],es[b]].sort().join("‖");pares[k]=(pares[k]||0)+1;}
+  });
+  const nomes=Object.entries(conta).sort((a,b)=>b[1]-a[1]).slice(0,32).map(x=>x[0]);
+  const idx=Object.fromEntries(nomes.map((n,i)=>[n,i]));
+  const nos=nomes.map(n=>({n,c:conta[n],x:W/2+(Math.random()-0.5)*W*.7,
+    y:H/2+(Math.random()-0.5)*H*.7,vx:0,vy:0}));
+  const arestas=Object.entries(pares).map(([k,w])=>{const[a,b]=k.split("‖");
+    return idx[a]!=null&&idx[b]!=null?{a:idx[a],b:idx[b],w}:null}).filter(Boolean);
+  for(let t=0;t<260;t++){ // forca simples
+    nos.forEach((p,i)=>{nos.forEach((q,j)=>{if(i===j)return;
+      let dx=p.x-q.x,dy=p.y-q.y,d2=dx*dx+dy*dy+40,f=900/d2;
+      p.vx+=dx*f/Math.sqrt(d2);p.vy+=dy*f/Math.sqrt(d2);});
+      p.vx+=(W/2-p.x)*.004;p.vy+=(H/2-p.y)*.004;});
+    arestas.forEach(e=>{const p=nos[e.a],q=nos[e.b];
+      let dx=q.x-p.x,dy=q.y-p.y,d=Math.sqrt(dx*dx+dy*dy)||1,f=(d-70)*.004*Math.min(e.w,3);
+      p.vx+=dx/d*f;p.vy+=dy/d*f;q.vx-=dx/d*f;q.vy-=dy/d*f;});
+    nos.forEach(p=>{p.x=Math.max(14,Math.min(W-14,p.x+p.vx));
+      p.y=Math.max(12,Math.min(H-12,p.y+p.vy));p.vx*=.72;p.vy*=.72;});
+  }
+  function desenha(foco){
+    cx.clearRect(0,0,W,H);
+    cx.strokeStyle="#D8E0DC";
+    arestas.forEach(e=>{cx.lineWidth=Math.min(e.w,3);
+      cx.beginPath();cx.moveTo(nos[e.a].x,nos[e.a].y);cx.lineTo(nos[e.b].x,nos[e.b].y);cx.stroke();});
+    nos.forEach((p,i)=>{const r=4.5+Math.sqrt(p.c)*4;
+      cx.fillStyle=i===foco?"#8A2D0F":"#135E85";
+      cx.beginPath();cx.arc(p.x,p.y,r,0,7);cx.fill();
+      if(p.c>1||i===foco){cx.fillStyle="#15222D";cx.font="10px Spline Sans Mono";
+        cx.fillText(p.n.slice(0,22)+(i===foco?" ("+p.c+")":""),p.x+r+3,p.y+3);}});
+  }
+  desenha(-1);
+  cv.onmousemove=e=>{const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;
+    let f=-1;nos.forEach((p,i)=>{const rr=6+Math.sqrt(p.c)*4;if((p.x-mx)**2+(p.y-my)**2<rr*rr+40)f=i});
+    desenha(f);};
+}
+
+/* ---------- arquivo ---------- */
+function arquivo(){
+  const q=(document.getElementById("pesquisa").value||"").toLowerCase();
+  const relMin=+document.getElementById("relMin").value||0;
+  const amb=document.getElementById("ambitoSel").value;
+  const lst=itensP().filter(i=>{
+    if(i.relevancia<relMin)return false;
+    const fora=!noAlgarve(i);
+    if(amb==="algarve"&&fora)return false;
+    if(amb==="fora"&&!fora)return false;
+    if(concelhoSel&&i.municipio!==concelhoSel)return false;
+    if(q&&!(i.titulo+" "+(i.resumo||"")).toLowerCase().includes(q))return false;
+    return true;
+  }).sort((a,b)=>b.relevancia-a.relevancia||(b.publicado_em||"").localeCompare(a.publicado_em||""));
+  const el=document.getElementById("lista");
+  el.innerHTML=lst.length?"":"<div class='vazio'>Nenhum item.</div>";
+  lst.slice(0,nItens).forEach(i=>{
+    const d=document.createElement("article");d.className="item";
+    d.innerHTML=`<div class="meta"><span class="cat ${i.categoria}">${ROT[i.categoria]||i.categoria}</span>
+      <span>rel ${i.relevancia}</span><span>${i.municipio==="regiao"?"região":i.municipio}</span>
+      <span>${i.fonte||""}</span><span>${(i.publicado_em||"").slice(0,10)}</span></div>
+      <h3><a href="${i.url}" target="_blank" rel="noopener">${i.titulo}</a></h3>`;
+    el.appendChild(d);
+  });
+  const b=document.getElementById("mais");b.hidden=lst.length<=nItens;
+  b.onclick=()=>{nItens+=40;arquivo();};
+}
+
+/* ---------- ranking de entidades ---------- */
+function ranking(){
+  const bs=itensP().filter(i=>noAlgarve(i)&&(!concelhoSel||i.municipio===concelhoSel));
+  const c={};
+  bs.forEach(i=>(i.entidades||[]).forEach(e=>{
+    if(e.tipo==="pessoa")return;
+    const k=e.nome+"|"+e.tipo;c[k]=(c[k]||0)+1;}));
+  const top=Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  const max=Math.max(1,...top.map(x=>x[1]));
+  const el=document.getElementById("ranking");
+  el.innerHTML=top.length?"":"<div class='vazio'>Sem entidades neste filtro.</div>";
+  top.forEach(([k,n],i)=>{
+    const [nome,tipo]=k.split("|");
+    const b=document.createElement("button");b.className="rk";
+    b.innerHTML=`<span class="pos">${i+1}</span>
+      <span class="nome">${nome}<small>${tipo}</small></span>
+      <span class="barra-r" style="width:${n/max*100}%"></span>
+      <span class="n">${n}</span>`;
+    b.onclick=()=>{
+      const det=document.querySelector("details.arquivo");det.open=true;
+      document.getElementById("pesquisa").value=nome;
+      document.getElementById("relMin").value=0;
+      document.getElementById("ambitoSel").value="todos";
+      nItens=40;arquivo();det.scrollIntoView({behavior:"smooth"});};
+    el.appendChild(b);
+  });
+}
+
+function refresca(){ticker();mapa();kpis();sinais();ranking();tendencias();grafo();arquivo();
+  const p=periodo();
+  document.getElementById("periodoNota").textContent=
+    (p.de||p.ate||catsActivas.size<5)?`a mostrar ${itensP().length} de ${D.total} itens`
+      :`${D.total} itens, todo o período`;}
+["pesquisa","relMin","ambitoSel"].forEach(id=>
+  document.getElementById(id).addEventListener("input",()=>{nItens=40;arquivo();}));
+["dataDe","dataAte"].forEach(id=>
+  document.getElementById(id).addEventListener("input",()=>{nSinais=14;nItens=40;refresca();}));
+document.getElementById("limparDatas").onclick=()=>{
+  document.getElementById("dataDe").value="";document.getElementById("dataAte").value="";refresca();};
+document.getElementById("camada").addEventListener("input",mapa);
+window.addEventListener("resize",grafo);
+refresca();
+</script>
+</body>
+</html>

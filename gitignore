@@ -1,0 +1,12 @@
+# bases de dados locais (o site publica so o dados.js exportado)
+*.db
+
+# exports locais de trabalho (a versao publicada vive em site/)
+/dados.js
+
+# ficheiros temporarios e de teste
+teste*.js
+lau.geojson
+__pycache__/
+*.pyc
+check_report.csv
