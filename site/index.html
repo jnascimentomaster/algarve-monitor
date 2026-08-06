@@ -284,6 +284,16 @@ details.arquivo>div{padding:0 18px 16px}
   </section>
 
   <section class="painel">
+    <h2>Financiamento público — PT2030, PRR e CORDIS por beneficiário</h2>
+    <div id="finTotais"></div>
+    <div class="emp-g">
+      <div><h3>Operações mais recentes<span id="finRecTit"></span></h3><div id="finRecentes"></div></div>
+      <div><h3>Top 10 beneficiários por montante acumulado, Algarve</h3><div id="finTop"></div></div>
+    </div>
+    <div class="ind-nota" id="finNota"></div>
+  </section>
+
+  <section class="painel">
     <h2>Livro de sinais — acontecimentos concretos, não artigos</h2>
     <div id="sinais"></div>
     <button class="mais" id="maisSinais" hidden>Mostrar mais sinais</button>
@@ -854,7 +864,52 @@ function empresas(){
     Demografia das Empresas, Contas Regionais, DGPJ).`;
 }
 
-function refresca(){ticker();mapa();kpis();sinais();ranking();tendencias();indicadores();empresas();grafo();arquivo();
+/* ---------- financiamento publico (Fase 1c) ---------- */
+function financiamento(){
+  const F = D.financiamento || {por_fonte:[], por_concelho:{}, recentes:[], top_beneficiarios:[]};
+  const totEl = document.getElementById("finTotais"),
+        recEl = document.getElementById("finRecentes"),
+        topEl = document.getElementById("finTop"),
+        nota = document.getElementById("finNota"),
+        recTit = document.getElementById("finRecTit");
+  if(!F.por_fonte.length){
+    totEl.innerHTML = "<div class='vazio'>Sem dados de financiamento. Corre python harvest_dados.py fetch --fonte financiamento.</div>";
+    recEl.innerHTML=""; topEl.innerHTML=""; nota.textContent=""; recTit.textContent="";
+    return;
+  }
+  const max = Math.max(...F.por_fonte.map(f=>f.total_aprovado));
+  const concTot = concelhoSel && F.por_concelho[concelhoSel];
+  totEl.innerHTML = F.por_fonte.map(f=>
+    `<div class="bar"><span>${f.fonte}</span>`+
+    `<i style="width:${Math.max(2,f.total_aprovado/max*100)}%"></i>`+
+    `<span class="n">${fmtEURc(f.total_aprovado)} · ${f.n} linhas</span></div>`).join("")+
+    (concTot ? `<div class="sf-coer">total em <b>${concelhoSel}</b>: ${fmtEURc(concTot.total_aprovado)} em ${concTot.n} linhas</div>` : "");
+  recTit.textContent = concelhoSel ? ` · ${concelhoSel}` : "";
+  const recFiltradas = (concelhoSel ? F.recentes.filter(r=>r.concelho===concelhoSel) : F.recentes);
+  recEl.innerHTML = recFiltradas.length ? recFiltradas.map(r=>{
+    const desig = (r.designacao||"").length>70 ? r.designacao.slice(0,70)+"…" : (r.designacao||"");
+    return `<div class="bar" style="grid-template-columns:1fr 88px 96px">
+       <span>${r.beneficiario}<br><span style="color:var(--tinta2);font-size:11px">${desig}${desig&&r.programa?" · ":""}${r.programa||""}</span></span>
+       <span class="n">${fmtEURc(r.montante_aprovado||0)}</span>
+       <span style="text-align:right;color:var(--tinta2);font-size:11px">${r.fonte} · ${r.concelho||"—"}</span>
+     </div>`;}).join("") : "<div class='vazio'>Sem operações datadas para este filtro.</div>";
+  const maxTop = F.top_beneficiarios.length ? F.top_beneficiarios[0].total_aprovado : 1;
+  topEl.innerHTML = F.top_beneficiarios.map(b=>
+    `<div class="bar"><span>${b.beneficiario}</span>`+
+    `<i style="width:${Math.max(2,b.total_aprovado/maxTop*100)}%"></i>`+
+    `<span class="n">${fmtEURc(b.total_aprovado)}</span></div>`).join("");
+  const atualizacoes = F.por_fonte.map(f=>`${f.fonte}: ${(f.actualizado_em||"").slice(0,10)}`).join(" · ");
+  nota.innerHTML = `Fundo aprovado por beneficiário (co-financiamento público, não o custo total elegível do investimento). `+
+    `PT2030: quando a operação é nacional, o valor é a fatia proporcional atribuída ao Algarve pela "Percentagem `+
+    `Localização da Operação"; a fonte não publica data de aprovação, por isso a data usada é a de início efetivo `+
+    `da operação. PRR: conta só o "Beneficiário Final"/"Beneficiário Direto" — o "Beneficiário Intermediário" `+
+    `gestor (ex.: IAPMEI, ACSS) fica de fora para não contar o mesmo euro duas vezes; a data é a de início do `+
+    `projecto. CORDIS: contribuição da UE a organizações do Algarve em Horizon Europe. Datas de início usadas `+
+    `como aproximação a "mais recente" nas duas primeiras fontes: nenhuma publica uma data de aprovação/decisão `+
+    `comparável. Pessoas singulares excluídas nas três fontes. Última recolha por fonte — ${atualizacoes}.`;
+}
+
+function refresca(){ticker();mapa();kpis();sinais();ranking();tendencias();indicadores();empresas();financiamento();grafo();arquivo();
   const p=periodo();
   document.getElementById("periodoNota").textContent=
     (p.de||p.ate||catsActivas.size<5)?`a mostrar ${itensP().length} de ${D.total} itens`
