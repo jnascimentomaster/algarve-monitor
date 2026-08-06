@@ -71,8 +71,25 @@ main{max-width:1240px;margin:0 auto;padding:20px 26px 70px;display:grid;gap:16px
 .kpi .v small{font-size:13px;color:var(--tinta2)}
 .kpi .r{font:11px "Spline Sans Mono";color:var(--tinta2);text-transform:uppercase;
   letter-spacing:.08em;margin-top:2px}
-.brief-nota{margin-top:12px;border-top:1px dashed var(--linha);padding-top:10px;
-  font-size:12.5px;color:var(--tinta2)}
+.brief-bloco{margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed var(--linha)}
+.brief-bloco:last-of-type{border-bottom:none;margin-bottom:6px;padding-bottom:0}
+.brief-rot{font:600 10px "Spline Sans Mono";letter-spacing:.1em;text-transform:uppercase;
+  color:var(--tinta2);margin-bottom:6px}
+.brief-semanal .brief-rot{color:var(--atlantico)}
+.brief-bloco p{margin-top:6px;line-height:1.5;font-size:13px}
+.brief-bloco p:first-of-type{margin-top:0}
+.brief-h{font:600 10.5px "Spline Sans Mono";letter-spacing:.1em;text-transform:uppercase;
+  color:var(--atlantico);margin-top:10px}
+.brief-h:first-child{margin-top:0}
+.brief-link{display:inline-block;font:600 11.5px "Archivo";color:var(--atlantico);
+  text-decoration:none;margin-top:2px}
+.brief-link:hover{text-decoration:underline}
+details.brief-item{border-top:1px solid var(--linha2);padding:8px 2px}
+details.brief-item:first-child{border-top:none}
+details.brief-item summary{cursor:pointer;font:600 12.5px "Archivo"}
+details.brief-item .brief-corpo{padding-top:8px}
+details.brief-item .brief-corpo p{margin-top:6px;font-size:12.5px;line-height:1.5}
+details.brief-item .brief-corpo .brief-h{font-size:9.5px}
 
 /* sinais */
 .sinal{display:grid;grid-template-columns:112px 1fr;gap:10px;padding:10px 2px;
@@ -245,11 +262,15 @@ details.arquivo>div{padding:0 18px 16px}
 
     <section class="painel">
       <h2>Situação</h2>
+      <div id="briefAtual"></div>
       <div class="kpis" id="kpis"></div>
-      <div class="brief-nota">O brief diário gerado por IA liga aqui quando o módulo
-        <span class="mono">brief.py</span> entrar (síntese das últimas 24h sobre estes sinais).</div>
     </section>
   </div>
+
+  <details class="arquivo" id="arquivoBriefs">
+    <summary>Briefs anteriores</summary>
+    <div id="listaBriefs"></div>
+  </details>
 
   <div class="g2b">
     <section class="painel">
@@ -326,7 +347,8 @@ details.arquivo>div{padding:0 18px 16px}
 <script src="dados.js"></script>
 <script src="geo.js"></script>
 <script>
-const D = window.DADOS||{itens:[],total:0,gerado_em:""};
+const D = window.DADOS||{itens:[],total:0,gerado_em:"",briefs:[]};
+const BRIEFS = D.briefs||[];
 const GEO = window.GEO||{features:[]};
 const CATS=["tech","inovacao","negocios","turismo","regional"];
 const CORES={tech:"#135E85",inovacao:"#1F8A7D",negocios:"#B97F1F",
@@ -469,6 +491,62 @@ function kpis(){
     `<div class="kpi"><div class="v">${tot?fmtEUR(tot):"—"}</div><div class="r">€ identificados</div></div>`+
     `<div class="kpi"><div class="v">${topC?topC[0]:"—"} <small>${topC?topC[1]:""}</small></div><div class="r">concelho mais activo</div></div>`+
     `<div class="kpi"><div class="v">${ents.size}</div><div class="r">entidades distintas</div></div>`;
+}
+
+/* ---------- brief (Fase 2): markdown simples (paragrafos, negrito, ##) ---------- */
+function mdSimples(md){
+  if(!md)return "";
+  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const negrito=s=>esc(s).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
+  let html="",buf=[];
+  const flush=()=>{if(buf.length){html+=`<p>${negrito(buf.join(" "))}</p>`;buf=[];}};
+  (md||"").split("\n").forEach(l=>{
+    const t=l.trim(), h=t.match(/^#{1,3}\s+(.*)$/);
+    if(h){flush();html+=`<div class="brief-h">${esc(h[1])}</div>`;}
+    else if(!t)flush();
+    else buf.push(t);
+  });
+  flush();
+  return html||`<p>${negrito(md)}</p>`;
+}
+const fmtDataHora=iso=>(iso||"").slice(0,16).replace("T"," ")+" UTC";
+function briefsPorTipo(tipo){
+  return BRIEFS.filter(b=>b.tipo===tipo).sort((a,b)=>b.data.localeCompare(a.data));
+}
+function situacaoBrief(){
+  const el=document.getElementById("briefAtual");
+  const diario=briefsPorTipo("diario")[0], semanal=briefsPorTipo("semanal")[0];
+  const segunda=new Date().getDay()===1;
+  let html="";
+  if(segunda&&semanal){
+    html+=`<div class="brief-bloco brief-semanal"><div class="brief-rot">Digest semanal · semana ${semanal.data}</div>${mdSimples(semanal.texto_md)}</div>`;
+  }
+  if(diario){
+    html+=`<div class="brief-bloco"><div class="brief-rot">Brief diário · ${fmtDataHora(diario.gerado_em)}</div>${mdSimples(diario.texto_md)}</div>`;
+  }
+  if(!html){
+    html=`<div class="vazio">Ainda sem brief gerado. Corre <span class="mono">python brief.py diario</span>.</div>`;
+  }
+  if(BRIEFS.length){
+    html+=`<a href="#arquivoBriefs" class="brief-link" id="verBriefs">briefs anteriores →</a>`;
+  }
+  el.innerHTML=html;
+  const link=document.getElementById("verBriefs");
+  if(link)link.onclick=e=>{e.preventDefault();
+    const det=document.getElementById("arquivoBriefs");det.open=true;
+    det.scrollIntoView({behavior:"smooth"});};
+}
+function arquivoBriefs(){
+  const el=document.getElementById("listaBriefs");
+  const lst=[...BRIEFS].sort((a,b)=>b.data.localeCompare(a.data)||b.tipo.localeCompare(a.tipo));
+  el.innerHTML=lst.length?"":"<div class='vazio'>Sem briefs gravados ainda.</div>";
+  lst.forEach(b=>{
+    const det=document.createElement("details");det.className="brief-item";
+    det.innerHTML=`<summary>${b.data} · ${b.tipo==="semanal"?"digest semanal":"brief diário"} `+
+      `<span class="mono" style="font-weight:400;color:var(--tinta2)">(${b.backend})</span></summary>`+
+      `<div class="brief-corpo">${mdSimples(b.texto_md)}</div>`;
+    el.appendChild(det);
+  });
 }
 
 /* ---------- sinais ---------- */
@@ -909,7 +987,7 @@ function financiamento(){
     `comparável. Pessoas singulares excluídas nas três fontes. Última recolha por fonte — ${atualizacoes}.`;
 }
 
-function refresca(){ticker();mapa();kpis();sinais();ranking();tendencias();indicadores();empresas();financiamento();grafo();arquivo();
+function refresca(){ticker();mapa();situacaoBrief();kpis();sinais();ranking();tendencias();indicadores();empresas();financiamento();grafo();arquivo();arquivoBriefs();
   const p=periodo();
   document.getElementById("periodoNota").textContent=
     (p.de||p.ate||catsActivas.size<5)?`a mostrar ${itensP().length} de ${D.total} itens`
