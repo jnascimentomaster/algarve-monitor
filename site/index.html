@@ -267,6 +267,12 @@ details.arquivo>div{padding:0 18px 16px}
     </section>
   </div>
 
+  <section class="painel">
+    <h2>Livro de sinais — acontecimentos concretos, não artigos</h2>
+    <div id="sinais"></div>
+    <button class="mais" id="maisSinais" hidden>Mostrar mais sinais</button>
+  </section>
+
   <details class="arquivo" id="arquivoBriefs">
     <summary>Briefs anteriores</summary>
     <div id="listaBriefs"></div>
@@ -315,12 +321,6 @@ details.arquivo>div{padding:0 18px 16px}
   </section>
 
   <section class="painel">
-    <h2>Livro de sinais — acontecimentos concretos, não artigos</h2>
-    <div id="sinais"></div>
-    <button class="mais" id="maisSinais" hidden>Mostrar mais sinais</button>
-  </section>
-
-  <section class="painel">
     <h2>Rede de entidades — co-menções nas notícias</h2>
     <canvas id="grafo"></canvas>
     <div class="grafo-nota">Nós: entidades mais mencionadas (empresas e organizações),
@@ -360,7 +360,7 @@ const SINAL_ROT={investimento:"investimento",financiamento_publico:"financ. púb
   expansao_ou_contratacao:"expansão / contratação",encerramento_ou_saida:"encerramento",
   parceria:"parceria",nomeacao:"nomeação",evento_anunciado:"evento",
   dados_ou_estudo:"dados / estudo"};
-let concelhoSel=null, nSinais=14, nItens=40;
+let concelhoSel=null, nSinais=2, nItens=40;
 
 /* filtro global de periodo */
 function periodo(){
@@ -400,13 +400,23 @@ document.getElementById("gerado").textContent=
   "gerado "+(D.gerado_em||"").slice(0,16).replace("T"," ")+" UTC · "+D.total+" itens";
 
 /* ---------- ticker ---------- */
+// Fixo em tech+inovação (que inclui startups, por definição do classificador em
+// enrich.py): o ticker é a manchete temática do monitor, por isso ignora de
+// proposito os chips de categoria global (catsActivas), que servem para
+// explorar o resto do dashboard, nao para decidir o que aparece aqui.
+const TICKER_CATS=["tech","inovacao"];
 function ticker(){
-  const top=itensP().filter(i=>comSinal(i)&&(i.montante_eur||i.relevancia>=8))
-    .sort((a,b)=>(b.montante_eur||0)-(a.montante_eur||0)).slice(0,18);
+  const top=D.itens.filter(i=>noPeriodo(i)&&TICKER_CATS.includes(i.categoria)&&comSinal(i))
+    .sort((a,b)=>(b.montante_eur||0)-(a.montante_eur||0)||b.relevancia-a.relevancia).slice(0,18);
+  const el=document.getElementById("ticker");
+  if(!top.length){
+    el.innerHTML="<span class='t'>Sem sinais de tecnologia ou inovação nos últimos dias.</span>";
+    return;
+  }
   const html=top.map(i=>`<span class="t">${i.montante_eur?`<b>${fmtEUR(i.montante_eur)}</b> · `:""}
     <span class="tipo">${SINAL_ROT[i.sinal]||i.sinal}</span> · ${i.titulo.slice(0,70)}
     · ${i.municipio==="regiao"?"região":i.municipio}</span>`).join("·");
-  document.getElementById("ticker").innerHTML=html+html; // loop continuo
+  el.innerHTML=html+html; // loop continuo
 }
 
 /* ---------- mapa ---------- */
@@ -569,7 +579,7 @@ function sinais(){
   });
   const b=document.getElementById("maisSinais");
   b.hidden=lst.length<=nSinais;
-  b.onclick=()=>{nSinais+=14;sinais();};
+  b.onclick=()=>{nSinais+=6;sinais();};
 }
 
 /* ---------- tendencias ---------- */
@@ -863,9 +873,10 @@ function empresas(){
     const s=S(serie), el=document.getElementById(id);
     if(!s){el.innerHTML="<div class='vazio'>sem dados</div>";return null;}
     const a=s.ambitos[amb]||s.ambitos.regiao||{};
+    // ordem fixa de E.sectores (nao por valor): a mesma ordem em todos os
+    // graficos de sector facilita comparar VAB vs VN vs pessoal vs fluxo.
     const linhas=Object.keys(E.sectores||{}).filter(k=>k!=="todos")
-      .map(k=>{const p=ult(a[k]||[]);return p?[k,p[1],p[0]]:null}).filter(Boolean)
-      .sort((x,y)=>y[1]-x[1]);
+      .map(k=>{const p=ult(a[k]||[]);return p?[k,p[1],p[0]]:null}).filter(Boolean);
     if(!linhas.length){el.innerHTML="<div class='vazio'>sem dados</div>";return null;}
     const max=Math.max(...linhas.map(l=>l[1]));
     el.innerHTML=linhas.map(([k,v])=>
@@ -903,8 +914,8 @@ function empresas(){
     const meses=(aC.todos||[]).slice(-12).map(p=>p[0]);
     const per=meses.length?`${rotPeriodo(meses[0])} a ${rotPeriodo(meses[meses.length-1])}`:"";
     const secs=Object.keys(E.sectores||{}).filter(k=>k!=="todos");
-    const linhas=secs.map(k=>[k,j12(aC[k]),j12(aD[k])])
-      .filter(l=>l[1]||l[2]).sort((x,y)=>y[1]-x[1]);
+    // mesma ordem fixa de E.sectores que os graficos de VAB/VN acima
+    const linhas=secs.map(k=>[k,j12(aC[k]),j12(aD[k])]).filter(l=>l[1]||l[2]);
     const max=Math.max(1,...linhas.map(l=>Math.max(l[1],l[2])));
     nel.innerHTML=
       `<h3 style="font:600 11px 'Spline Sans Mono';letter-spacing:.14em;text-transform:uppercase;color:var(--tinta2);margin-bottom:4px">Fluxo por sector, últimos 12 meses · ${base==="regiao"?"região":base}</h3>`+
