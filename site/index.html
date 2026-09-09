@@ -269,6 +269,8 @@ details.arquivo>div{padding:0 18px 16px}
 
   <section class="painel">
     <h2>Livro de sinais — acontecimentos concretos, não artigos</h2>
+    <p class="sub" id="notaSinais" style="text-transform:none;letter-spacing:0;
+       font-size:12px;margin:-4px 0 8px"></p>
     <div id="sinais"></div>
     <button class="mais" id="maisSinais" hidden>Mostrar mais sinais</button>
   </section>
@@ -396,6 +398,21 @@ const fmtEUR=v=>v>=1e6?(v/1e6).toLocaleString("pt-PT",{maximumFractionDigits:1})
 const noAlgarve=i=>!["fora_do_algarve","indeterminado"].includes(i.municipio);
 const comSinal=i=>i.sinal&&i.sinal!=="nenhum"&&noAlgarve(i)&&i.categoria!=="irrelevante";
 
+/* Janela dos paineis de sinais (livro de sinais e ticker). Independente do
+   filtro global de periodo de proposito: esses dois paineis respondem a "o que
+   esta a acontecer agora", e ordenam por montante, por isso sem janela um
+   artigo antigo com um numero grande fixava-se no topo e nunca mais saia.
+   O arquivo, os graficos e os indicadores continuam a obedecer ao selector.
+   90 dias = o mesmo piso de DIAS_MAX no harvest_news.py: com a recolha a
+   parar aos 90, uma janela maior aqui so mostrava historico antigo. */
+const DIAS_SINAIS=90;
+const LIMITE_SINAIS=(()=>{const d=new Date();
+  d.setDate(d.getDate()-DIAS_SINAIS);return d.toISOString().slice(0,10);})();
+// Item sem data entra, mesma regra do harvest_news.py: nao se perde um item
+// por causa de um feed que nao publica data.
+const recente=i=>{const d=(i.publicado_em||"").slice(0,10);
+  return !d||d>=LIMITE_SINAIS;};
+
 document.getElementById("gerado").textContent=
   "gerado "+(D.gerado_em||"").slice(0,16).replace("T"," ")+" UTC · "+D.total+" itens";
 
@@ -406,7 +423,7 @@ document.getElementById("gerado").textContent=
 // explorar o resto do dashboard, nao para decidir o que aparece aqui.
 const TICKER_CATS=["tech","inovacao"];
 function ticker(){
-  const top=D.itens.filter(i=>noPeriodo(i)&&TICKER_CATS.includes(i.categoria)&&comSinal(i))
+  const top=D.itens.filter(i=>noPeriodo(i)&&recente(i)&&TICKER_CATS.includes(i.categoria)&&comSinal(i))
     .sort((a,b)=>(b.montante_eur||0)-(a.montante_eur||0)||b.relevancia-a.relevancia).slice(0,18);
   const el=document.getElementById("ticker");
   if(!top.length){
@@ -561,11 +578,11 @@ function arquivoBriefs(){
 
 /* ---------- sinais ---------- */
 function sinais(){
-  const lst=itensP().filter(comSinal)
+  const lst=itensP().filter(comSinal).filter(recente)
     .filter(i=>!concelhoSel||i.municipio===concelhoSel)
     .sort((a,b)=>(b.montante_eur||0)-(a.montante_eur||0)||b.relevancia-a.relevancia);
   const el=document.getElementById("sinais");
-  el.innerHTML=lst.length?"":"<div class='vazio'>Sem sinais neste filtro. Os sinais aparecem depois da reclassificação com o schema novo.</div>";
+  el.innerHTML=lst.length?"":`<div class='vazio'>Sem sinais nos últimos ${DIAS_SINAIS} dias com este filtro.</div>`;
   lst.slice(0,nSinais).forEach(i=>{
     const d=document.createElement("article");d.className="sinal";
     const ents=(i.entidades||[]).filter(e=>e.tipo!=="pessoa").map(e=>e.nome).slice(0,3).join(" · ");
@@ -580,6 +597,10 @@ function sinais(){
   const b=document.getElementById("maisSinais");
   b.hidden=lst.length<=nSinais;
   b.onclick=()=>{nSinais+=6;sinais();};
+  const nota=document.getElementById("notaSinais");
+  if(nota)nota.textContent=
+    `Últimos ${DIAS_SINAIS} dias (desde ${LIMITE_SINAIS}), por montante. `+
+    `O histórico completo está no arquivo, no fim da página.`;
 }
 
 /* ---------- tendencias ---------- */
