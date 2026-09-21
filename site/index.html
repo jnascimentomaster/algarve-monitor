@@ -72,6 +72,11 @@ main{max-width:1240px;margin:0 auto;padding:20px 26px 70px;display:grid;gap:16px
 .kpi .r{font:11px "Spline Sans Mono";color:var(--tinta2);text-transform:uppercase;
   letter-spacing:.08em;margin-top:2px}
 .brief-bloco{margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed var(--linha)}
+.brief-bloco{overflow-wrap:anywhere}
+.brief-lista{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.45}
+.brief-lista li{margin-top:4px}
+.brief-bloco a{color:var(--atlantico);text-decoration:none}
+.brief-bloco a:hover{text-decoration:underline}
 .brief-bloco:last-of-type{border-bottom:none;margin-bottom:6px;padding-bottom:0}
 .brief-rot{font:600 10px "Spline Sans Mono";letter-spacing:.1em;text-transform:uppercase;
   color:var(--tinta2);margin-bottom:6px}
@@ -523,18 +528,28 @@ function kpis(){
 /* ---------- brief (Fase 2): markdown simples (paragrafos, negrito, ##) ---------- */
 function mdSimples(md){
   if(!md)return "";
-  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   const negrito=s=>esc(s).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
-  let html="",buf=[];
-  const flush=()=>{if(buf.length){html+=`<p>${negrito(buf.join(" "))}</p>`;buf=[];}};
+  const link=(u,t)=>`<a href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`;
+  /* "Titulo (https://...)" no fim da linha vira link no titulo; URL solto vira "fonte" */
+  const inline=s=>{
+    const m=s.match(/^(.*\S)\s*\((https?:\/\/[^\s)]+)\)\s*$/);
+    if(m){const pre=m[1].match(/^(\[[^\]]+\]\s*)?(.*)$/);
+      return negrito(pre[1]||"")+link(m[2],negrito(pre[2]));}
+    return s.split(/(https?:\/\/\S+)/).map((p,k)=>k%2?link(p,"fonte"):negrito(p)).join("");
+  };
+  let html="",buf=[],lista=[];
+  const flushP=()=>{if(buf.length){html+=`<p>${inline(buf.join(" "))}</p>`;buf=[];}};
+  const flushL=()=>{if(lista.length){html+=`<ul class="brief-lista">${lista.map(x=>`<li>${inline(x)}</li>`).join("")}</ul>`;lista=[];}};
   (md||"").split("\n").forEach(l=>{
-    const t=l.trim(), h=t.match(/^#{1,3}\s+(.*)$/);
-    if(h){flush();html+=`<div class="brief-h">${esc(h[1])}</div>`;}
-    else if(!t)flush();
-    else buf.push(t);
+    const t=l.trim(), h=t.match(/^#{1,3}\s+(.*)$/), li=t.match(/^[-*]\s+(.*)$/);
+    if(h){flushP();flushL();html+=`<div class="brief-h">${esc(h[1])}</div>`;}
+    else if(li){flushP();lista.push(li[1]);}
+    else if(!t){flushP();flushL();}
+    else{flushL();buf.push(t);}
   });
-  flush();
-  return html||`<p>${negrito(md)}</p>`;
+  flushP();flushL();
+  return html||`<p>${inline(md)}</p>`;
 }
 const fmtDataHora=iso=>(iso||"").slice(0,16).replace("T"," ")+" UTC";
 function briefsPorTipo(tipo){
